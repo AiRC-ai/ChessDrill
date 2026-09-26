@@ -5,10 +5,16 @@ ChessDrill is a focused, browser-based chess opening trainer. Choose exact varia
 ## Features
 
 - 124 organized opening families with 3,755 individually selectable named lines across ECO A00–E99
-- Fine-grained line selection and maximum-depth control
+- Fine-grained line selection with separate White/Black repertoire roles
 - Search, ECO/name/variation-count sorting, and White/Black opening-focus filters
 - White, Black, or repertoire-side practice
-- Spaced rotation that emphasizes new and missed lines, rests lines you just answered cleanly, and only schedules lines the chosen side can actually play
+- Weighted rotation that emphasizes new and missed lines
+- Position-level spaced repetition, due reviews, timing, and coverage maps
+- Transposition-aware Theory Challenge with three opponent difficulties
+- Adaptive piece/destination hints and optional timed recall
+- Opening plans, thematic pawn breaks, and immediate mistake review
+- PGN repertoire import/export plus full JSON progress backup
+- Locally hosted Lichess-style pieces with animated moves and last-move highlights
 - Click-to-move interactive chessboard with legal move guidance
 - Hints, reveal-and-continue, accuracy tracking, and persistent local progress
 - Responsive desktop and mobile layout

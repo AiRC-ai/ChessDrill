@@ -1,335 +1,59 @@
 import { Chess } from 'chess.js';
 import { OPENINGS, allLines } from './openings.js';
-import { chooseTheoryMove, createDrill, drillableLines, parseMove, practicedLines, sanitizeStat, theoryOptions, weightedPick } from './drill.js';
+import { chooseTheoryMove, createDrill, eligibleSelectedLines, parseMove, weightedPick } from './drill.js';
+import { buildPositionIndex, coverageForLines, duePositionKeys, linesToPgn, openingInsight, parsePgnCollection, positionKey, positionOptions, updatePositionStat } from './learning.js';
 import './styles.css';
 
-const PIECE_NAMES = { p:'pawn', n:'knight', b:'bishop', r:'rook', q:'queen', k:'king' };
-const MOVE_MS = 240;
-const REPLY_PAUSE_MS = 380;
-const BEGINNER_FAMILIES = new Set(['Italian Game','Scotch Game','Four Knights Game','Ruy Lopez','Vienna Game',"Queen's Gambit",'London System','English Opening',"King's Indian Attack",'Sicilian Defense','French Defense','Caro-Kann Defense','Scandinavian Defense','Pirc Defense',"King's Indian Defense",'Slav Defense','Dutch Defense']);
-const INTERMEDIATE_FAMILIES = new Set([...BEGINNER_FAMILIES,'Alekhine Defense','Benoni Defense','Benko Gambit','Bishop\'s Opening','Catalan Opening','English Defense','Grünfeld Defense','Modern Defense','Nimzo-Indian Defense','Nimzo-Larsen Attack',"Queen's Indian Defense",'Réti Opening','Semi-Slav Defense','Three Knights Opening','Trompowsky Attack','Bird Opening','Danish Gambit','King\'s Gambit','Petrov\'s Defense','Philidor Defense']);
-const RECOMMENDATIONS = [
-  { name:'Italian Game', reason:'Natural development and clear attacking plans.', levels:['beginner','intermediate','advanced'] },
-  { name:"Queen's Gambit", reason:'A principled introduction to positional chess.', levels:['beginner','intermediate','advanced'] },
-  { name:'London System', reason:'A dependable setup that is easy to revisit.', levels:['beginner','intermediate'] },
-  { name:'Caro-Kann Defense', reason:'A sound, structured answer to 1.e4.', levels:['beginner','intermediate','advanced'] },
-  { name:'French Defense', reason:'Teaches pawn chains and counterplay.', levels:['beginner','intermediate','advanced'] },
-  { name:'Sicilian Defense', reason:'Dynamic winning chances against 1.e4.', levels:['intermediate','advanced'] },
-  { name:'Ruy Lopez', reason:'Classic strategic themes at every level.', levels:['intermediate','advanced'] },
-  { name:"King's Indian Defense", reason:'Active kingside play against 1.d4.', levels:['intermediate','advanced'] },
-  { name:'Nimzo-Indian Defense', reason:'Rich positional play without a passive setup.', levels:['advanced'] },
-];
-const STORAGE_KEY = 'chessdrill-v1';
-const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-const validLineIds = new Set(allLines().map(line => line.id));
-const state = {
-  screen: 'library',
-  selected: new Set((saved.selected || []).filter(id => validLineIds.has(id))),
-  expanded: new Set(saved.expanded || ['italian']),
-  stats: saved.stats || {},
-  side: saved.side || 'repertoire',
-  maxPly: saved.maxPly || 14,
-  focus: saved.focus || 'all',
-  sort: saved.sort || 'eco',
-  query: '',
-  level: saved.level || 'beginner',
-  showShortLines: saved.showShortLines || false,
-  challengeDifficulty: saved.challengeDifficulty || 'common',
-  orientation: 'white',
-  session: null,
-  challenge: null,
-  selectedSquare: null,
-  message: '',
-  hint: false,
-};
+const PIECE_NAMES={p:'pawn',n:'knight',b:'bishop',r:'rook',q:'queen',k:'king'},MOVE_MS=240,REPLY_PAUSE_MS=380,PIECE_BASE=`${import.meta.env.BASE_URL}pieces/cburnett`;
+const BEGINNER=new Set(['Italian Game','Scotch Game','Four Knights Game','Ruy Lopez','Vienna Game',"Queen's Gambit",'London System','English Opening',"King's Indian Attack",'Sicilian Defense','French Defense','Caro-Kann Defense','Scandinavian Defense','Pirc Defense',"King's Indian Defense",'Slav Defense','Dutch Defense']);
+const INTERMEDIATE=new Set([...BEGINNER,'Alekhine Defense','Benoni Defense','Benko Gambit',"Bishop's Opening",'Catalan Opening','English Defense','Grünfeld Defense','Modern Defense','Nimzo-Indian Defense','Nimzo-Larsen Attack',"Queen's Indian Defense",'Réti Opening','Semi-Slav Defense','Three Knights Opening','Trompowsky Attack','Bird Opening','Danish Gambit',"King's Gambit","Petrov's Defense",'Philidor Defense']);
+const RECOMMENDATIONS=[['Italian Game','Natural development and clear attacking plans.'],["Queen's Gambit",'A principled introduction to positional chess.'],['London System','A dependable setup that is easy to revisit.'],['Caro-Kann Defense','A sound, structured answer to 1.e4.'],['French Defense','Teaches pawn chains and counterplay.'],['Sicilian Defense','Dynamic winning chances against 1.e4.'],['Ruy Lopez','Classic strategic themes at every level.'],["King's Indian Defense",'Active kingside play against 1.d4.']];
+const STORAGE_KEY='chessdrill-v2';
+function loadSaved(){try{return JSON.parse(localStorage.getItem(STORAGE_KEY)||'null')||{...JSON.parse(localStorage.getItem('chessdrill-v1')||'{}'),version:2};}catch{return {};}}
+const saved=loadSaved(),state={screen:'library',selected:new Set(saved.selected||[]),expanded:new Set(saved.expanded||['italian']),stats:saved.stats||{},positionStats:saved.positionStats||{},side:saved.side||'repertoire',focus:saved.focus||'all',sort:saved.sort||'eco',query:'',level:saved.level||'beginner',showShortLines:saved.showShortLines||false,challengeDifficulty:saved.challengeDifficulty||'common',timerSeconds:saved.timerSeconds||0,lineRoles:saved.lineRoles||{},customLines:saved.customLines||[],orientation:'white',session:null,challenge:null,selectedSquare:null,message:'',hintLevel:0,pendingOutOfBook:null};
+let theoryIndex;
+const workingLines=()=>[...allLines(),...state.customLines];
+const workingOpenings=()=>state.customLines.length?[...OPENINGS,{id:'custom-repertoire',name:'Custom repertoire',eco:'PGN',color:'white',description:'Your imported lines',lines:state.customLines}]:OPENINGS;
+function rebuildIndex(){theoryIndex=buildPositionIndex(workingLines());const valid=new Set(workingLines().map(l=>l.id));state.selected=new Set([...state.selected].filter(id=>valid.has(id)));}rebuildIndex();
+function save(){localStorage.setItem(STORAGE_KEY,JSON.stringify({version:2,selected:[...state.selected],expanded:[...state.expanded],stats:state.stats,positionStats:state.positionStats,side:state.side,focus:state.focus,sort:state.sort,level:state.level,showShortLines:state.showShortLines,challengeDifficulty:state.challengeDifficulty,timerSeconds:state.timerSeconds,lineRoles:state.lineRoles,customLines:state.customLines}));}
+const esc=v=>String(v).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+const pct=s=>s?.attempts?Math.round(s.correct/s.attempts*100):null;
+const lineRole=l=>state.lineRoles[l.id]||'both';
+function openingForLevel(o){const keep=l=>state.showShortLines||l.moves.length>=8||l.name==='Main line'||o.id==='custom-repertoire';if(state.level==='advanced')return {...o,lines:o.lines.filter(keep)};const allowed=state.level==='beginner'?BEGINNER:INTERMEDIATE;if(o.id!=='custom-repertoire'&&!allowed.has(o.name))return null;let lines=o.lines.filter(keep);if(state.level==='beginner')lines=lines.filter(l=>l.moves.length<=10||l.name==='Main line');lines.sort((a,b)=>a.moves.length-b.moves.length||a.name.localeCompare(b.name));lines=lines.slice(0,state.level==='beginner'?8:14);return lines.length?{...o,lines,description:`${lines.length} ${state.level} lines`}:null;}
+const levelCatalog=()=>workingOpenings().map(openingForLevel).filter(o=>o?.lines.length);
+function challengeLines(d=state.challengeDifficulty){const allowed=d==='common'?BEGINNER:d==='varied'?INTERMEDIATE:null,per=d==='common'?10:d==='varied'?28:Infinity;return workingOpenings().filter(o=>o.id==='custom-repertoire'||!allowed||allowed.has(o.name)).flatMap(o=>o.lines.filter(l=>l.moves.length>=8).sort((a,b)=>b.moves.length-a.moves.length).slice(0,per).map(l=>({...l,openingId:o.id,openingName:o.name})));}
+function selectedPositionKeys(){return new Set([...theoryIndex].filter(([,n])=>[...n.lineIds].some(id=>state.selected.has(id))).map(([k])=>k));}
+function appShell(content){const stats=Object.values(state.positionStats),total=stats.reduce((n,s)=>n+s.attempts,0),correct=stats.reduce((n,s)=>n+s.correct,0),due=duePositionKeys(state.positionStats,selectedPositionKeys()).length;return `<header class="topbar"><button class="brand" data-action="home"><span class="brand-mark">♞</span><span>Chess<span>Drill</span></span></button><nav><button class="nav-link ${state.screen==='library'?'active':''}" data-action="home">Repertoire</button><button class="nav-link ${state.screen.startsWith('challenge')?'active':''}" data-action="challenge">Theory Challenge</button><button class="nav-link ${state.screen==='progress'?'active':''}" data-action="progress">Progress</button></nav><div class="streak"><span>◆</span> ${correct}/${total||0} · ${due} due</div></header>${content}`;}
 
-function save() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ selected:[...state.selected], expanded:[...state.expanded], stats:state.stats, side:state.side, maxPly:state.maxPly, focus:state.focus, sort:state.sort, level:state.level, showShortLines:state.showShortLines, challengeDifficulty:state.challengeDifficulty }));
-}
+function recommendationsView(){return `<section class="recommended"><div class="section-heading"><div><p class="eyebrow">RECOMMENDED OPENINGS</p><h2>A strong place to start</h2></div><p>Balanced, practical repertoires</p></div><div class="recommendation-grid">${RECOMMENDATIONS.map(([name,reason])=>{const o=workingOpenings().find(x=>x.name===name),v=o&&(openingForLevel(o)||o);if(!v)return'';const added=v.lines.every(l=>state.selected.has(l.id));return `<article><span class="color-dot ${o.color}">${o.color==='white'?'W':'B'}</span><div><b>${esc(name)}</b><p>${esc(reason)}</p><small>${v.lines.length} foundational lines</small></div><button class="${added?'added':''}" data-action="recommend" data-id="${o.id}">${added?'✓ Added':'+ Add'}</button></article>`;}).join('')}</div></section>`;}
+function openingCard(o){const expanded=state.expanded.has(o.id),count=o.lines.filter(l=>state.selected.has(l.id)).length,all=count===o.lines.length,some=count>0&&!all;return `<article class="opening-card ${expanded?'expanded':''}"><div class="opening-summary"><button class="opening-toggle ${all?'checked':''} ${some?'partial':''}" data-action="toggle-opening" data-id="${o.id}"><span>✓</span></button><button class="opening-details" data-action="expand" data-id="${o.id}"><span class="color-dot ${o.color}">${o.color==='white'?'W':'B'}</span><span class="opening-title"><b>${esc(o.name)}</b><small>${o.eco} · ${esc(o.description)}</small></span><span class="line-count">${count}/${o.lines.length} lines</span><span class="chevron">⌄</span></button></div>${expanded?`<div class="line-list"><div class="line-list-head"><span>VARIATION</span><span>ROLE</span><button data-action="toggle-opening" data-id="${o.id}">${all?'Deselect all':'Select all'}</button></div>${o.lines.map(l=>`<div class="line-row"><label><input type="checkbox" data-line="${l.id}" ${state.selected.has(l.id)?'checked':''}><span class="fake-check">✓</span></label><span><b>${esc(l.name)}</b><small>${l.moves.join(' ')}</small></span><select data-role="${l.id}"><option value="both" ${lineRole(l)==='both'?'selected':''}>Both</option><option value="white" ${lineRole(l)==='white'?'selected':''}>White</option><option value="black" ${lineRole(l)==='black'?'selected':''}>Black</option></select><span class="accuracy">${pct(state.stats[l.id])===null?'New':pct(state.stats[l.id])+'%'}</span></div>`).join('')}</div>`:''}</article>`;}
+function libraryView(){const catalog=levelCatalog(),eligible=new Set(catalog.flatMap(o=>o.lines.map(l=>l.id))),selected=eligibleSelectedLines(workingLines(),state.selected,eligible);let visible=catalog.filter(o=>state.focus==='all'||o.color===state.focus),q=state.query.trim().toLowerCase();if(q)visible=visible.filter(o=>`${o.name} ${o.eco} ${o.lines.map(l=>l.name).join(' ')}`.toLowerCase().includes(q));visible.sort((a,b)=>state.sort==='name'?a.name.localeCompare(b.name):state.sort==='lines'?b.lines.length-a.lines.length:a.eco.localeCompare(b.eco)||a.name.localeCompare(b.name));return appShell(`<main class="page"><section class="hero"><div><p class="eyebrow">OPENING TRAINER</p><h1>Know your <em>next move.</em></h1><p>Train complete lines, review weak positions on schedule, and practice the same repertoire through unpredictable move orders.</p></div><div class="hero-card"><span>${state.selected.size}</span><small>active lines</small><button class="primary" data-action="start" ${selected.length?'':'disabled'}>Start smart drill <b>→</b></button></div></section><section class="level-panel"><div><p class="eyebrow">STUDY LEVEL</p><h2>Control the size of the library</h2><p>Levels hide rare lines; they never shorten an opening line.</p></div><div class="level-switch">${['beginner','intermediate','advanced'].map(x=>`<button class="${state.level===x?'active':''}" data-action="level" data-id="${x}"><b>${x[0].toUpperCase()+x.slice(1)}</b><small>${x==='beginner'?'Core plans':x==='intermediate'?'Broader theory':'Complete catalog'}</small></button>`).join('')}</div></section>${recommendationsView()}<section class="workspace"><aside class="filters"><p class="label">TRAINING SETTINGS</p><label>Practice side<select id="side"><option value="repertoire">Line repertoire side</option><option value="white" ${state.side==='white'?'selected':''}>White only</option><option value="black" ${state.side==='black'?'selected':''}>Black only</option></select></label><label>Recall clock<select id="timer"><option value="0">Untimed</option><option value="15" ${state.timerSeconds===15?'selected':''}>15 seconds</option><option value="5" ${state.timerSeconds===5?'selected':''}>5 seconds</option><option value="2" ${state.timerSeconds===2?'selected':''}>2 seconds</option></select></label><button class="primary wide" data-action="review" ${duePositionKeys(state.positionStats,selectedPositionKeys()).length?'':'disabled'}>Review due positions</button><div class="tip"><b>Position memory</b><p>Weak and overdue positions return more often, including through transpositions.</p></div></aside><section class="library"><div class="section-heading"><div><p class="eyebrow">${catalog.length} OPENING FAMILIES · ${catalog.reduce((n,o)=>n+o.lines.length,0).toLocaleString()} LINES</p><h2>Choose what to drill</h2></div><div class="selection-actions"><button data-action="select-visible">Select level</button><button data-action="clear">Clear</button></div></div><div class="catalog-tools"><label class="catalog-search"><span>⌕</span><input id="catalog-search" value="${esc(state.query)}" placeholder="Search openings, variations, or ECO…"></label><select id="focus"><option value="all">All openings</option><option value="white" ${state.focus==='white'?'selected':''}>White repertoire</option><option value="black" ${state.focus==='black'?'selected':''}>Black repertoire</option></select><select id="sort"><option value="eco">ECO order</option><option value="name" ${state.sort==='name'?'selected':''}>Name A–Z</option><option value="lines" ${state.sort==='lines'?'selected':''}>Most variations</option></select><button class="short-lines-toggle ${state.showShortLines?'active':''}" data-action="toggle-short"><span>${state.showShortLines?'✓':''}</span> Show lines under 4 moves</button></div><div class="opening-list">${visible.map(openingCard).join('')||'<div class="no-results">No openings match those filters.</div>'}</div></section></section></main>`);}
 
-function esc(value) { return String(value).replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c])); }
-function pct(stat) { const s = sanitizeStat(stat); return s.attempts ? Math.round(s.correct / s.attempts * 100) : null; }
+function startSession(review=false){let line,color,startPly=0;if(review){const key=duePositionKeys(state.positionStats,selectedPositionKeys())[0];if(!key)return;const node=theoryIndex.get(key),id=[...node.lineIds].find(x=>state.selected.has(x));line=workingLines().find(l=>l.id===id);const chess=new Chess();startPly=line.moves.findIndex((san,i)=>{const match=positionKey(chess.fen())===key;chess.move(san);return match;});color=node.turn==='w'?'white':'black';}else{const eligible=new Set(levelCatalog().flatMap(o=>o.lines.map(l=>l.id))),available=eligibleSelectedLines(workingLines(),state.selected,eligible).filter(l=>{const c=state.side==='repertoire'?l.repertoireColor:state.side;return lineRole(l)==='both'||lineRole(l)===c;});line=weightedPick(available,state.stats);if(!line)return;color=state.side==='repertoire'?line.repertoireColor:state.side;}const drill=createDrill(line,color),chess=new Chess();for(let i=0;i<startPly;i++)chess.move(drill.positions[i].san);const turn=color==='white'?'w':'b';state.session={drill,chess,cursor:startPly,userMoves:0,mistakes:0,complete:false,busy:drill.positions[startPly]?.turn!==turn,lastMove:null,review,promptStartedAt:Date.now(),mistakePositions:[]};state.orientation=color;state.selectedSquare=null;state.message='';state.hintLevel=0;state.screen='drill';render();setTimeout(advanceOpponent,REPLY_PAUSE_MS);}
+async function advanceOpponent(){const s=state.session;if(!s||s.complete)return;const turn=s.drill.color==='white'?'w':'b';while(s.cursor<s.drill.positions.length&&s.drill.positions[s.cursor].turn!==turn){s.busy=true;const p=s.drill.positions[s.cursor];await animateMove(p.from,p.to);if(state.session!==s)return;s.chess.move(p.san);s.lastMove={from:p.from,to:p.to};s.cursor++;s.busy=false;render();if(s.cursor<s.drill.positions.length&&s.drill.positions[s.cursor].turn!==turn)await delay(REPLY_PAUSE_MS);}s.promptStartedAt=Date.now();if(s.cursor>=s.drill.positions.length)finishLine();render();}
+function recordPosition(s,correct,hinted=false){const p=s.drill.positions[s.cursor];if(!p)return;const key=positionKey(p.fen);state.positionStats[key]=updatePositionStat(state.positionStats[key],{correct,hinted,responseMs:Date.now()-s.promptStartedAt});if(!correct&&!s.mistakePositions.includes(key))s.mistakePositions.push(key);save();}
+function finishLine(){const s=state.session;if(!s||s.complete)return;s.complete=true;const old=state.stats[s.drill.line.id]||{attempts:0,correct:0,completions:0};state.stats[s.drill.line.id]={attempts:old.attempts+s.userMoves,correct:old.correct+Math.max(0,s.userMoves-s.mistakes),completions:(old.completions||0)+1};save();}
 
-function openingForLevel(opening) {
-  const keepLine = line => state.showShortLines || line.moves.length >= 8 || line.name === 'Main line';
-  if (state.level === 'advanced') {
-    const lines = opening.lines.filter(keepLine);
-    return lines.length ? { ...opening, lines } : null;
-  }
-  const allowed = state.level === 'beginner' ? BEGINNER_FAMILIES : INTERMEDIATE_FAMILIES;
-  if (!allowed.has(opening.name)) return null;
-  const limit = state.level === 'beginner' ? 8 : 14;
-  const candidates = state.level === 'beginner'
-    ? opening.lines.filter(line => line.moves.length <= 10)
-    : opening.lines;
-  const lines = candidates.filter(keepLine).sort((a,b) => a.moves.length-b.moves.length || a.name.localeCompare(b.name)).slice(0,limit);
-  if (!lines.length) return null;
-  return { ...opening, lines, description:`${lines.length} ${state.level} ${lines.length===1?'line':'lines'}` };
-}
+function challengeSetupView(){return appShell(`<main class="challenge-setup page"><button class="back" data-action="home">← Back to repertoire</button><section class="challenge-intro"><p class="eyebrow">REAL-GAME PRACTICE</p><h1>Theory Challenge</h1><p>Start as a random color, play any documented theoretical move, and face replies selected from the position—not a rigid move sequence. Transpositions are recognized.</p></section><section class="difficulty-grid">${['common','varied','wild'].map(id=>`<button class="${state.challengeDifficulty===id?'active':''}" data-action="challenge-difficulty" data-id="${id}"><span class="difficulty-icon">${id==='common'?'♙':id==='varied'?'♞':'♛'}</span><b>${id==='wild'?'Unpredictable':id[0].toUpperCase()+id.slice(1)}</b><small>${id==='common'?'Mainstream replies':id==='varied'?'Broader theory':'Full catalog'}</small><p>${id==='common'?'Frequent openings and branches.':id==='varied'?'More families and sidelines.':'Rare responses weighted more evenly.'}</p><em>${challengeLines(id).length.toLocaleString()} eligible lines</em></button>`).join('')}</section><div class="challenge-start"><p><b>Every round randomizes your color.</b><br>When you leave the book, you decide whether to retry or continue.</p><button class="primary" data-action="start-challenge">Start challenge →</button></div></main>`);}
+const challengeOptions=c=>positionOptions(theoryIndex,c.chess.fen(),c.eligibleIds);
+function startChallenge(){const lines=challengeLines(),color=Math.random()<.5?'white':'black';state.challenge={chess:new Chess(),eligibleIds:new Set(lines.map(l=>l.id)),color,cursor:0,targetPly:state.challengeDifficulty==='common'?10:state.challengeDifficulty==='varied'?14:18,correct:0,mistakes:0,complete:false,busy:color==='black',lastMove:null,openingName:'Starting position'};state.orientation=color;state.selectedSquare=null;state.message='';state.hintLevel=0;state.pendingOutOfBook=null;state.screen='challenge-play';render();if(color==='black')setTimeout(advanceChallengeOpponent,REPLY_PAUSE_MS);}
+function updateChallengeOpening(c){const node=theoryIndex.get(positionKey(c.chess.fen())),names=node?[...node.openings]:[];c.openingName=names.length===1?names[0]:names.length<4&&names.length?names.join(' / '):names.length?`${names.length} possible openings`:'Out of book';}
+async function advanceChallengeOpponent(){const c=state.challenge;if(!c||c.complete)return;const choice=chooseTheoryMove(challengeOptions(c),state.challengeDifficulty);if(!choice)return finishChallenge('Theory branch complete');const move=c.chess.moves({verbose:true}).find(m=>m.san===choice.san);if(!move)return finishChallenge('Theory branch complete');c.busy=true;await animateMove(move.from,move.to);if(state.challenge!==c)return;c.chess.move(choice.san);c.cursor++;c.lastMove={from:move.from,to:move.to};c.busy=false;updateChallengeOpening(c);render();if(c.cursor>=c.targetPly)return finishChallenge('Target depth reached');if(!challengeOptions(c).size)return finishChallenge('Theory branch complete');}
+function finishChallenge(reason){const c=state.challenge;if(!c||c.complete)return;c.complete=true;c.busy=false;c.reason=reason;render();}
 
-function levelCatalog() { return OPENINGS.map(openingForLevel).filter(Boolean); }
+function boardHtml(chess,orientation){const board=chess.board(),ranks=orientation==='white'?[0,1,2,3,4,5,6,7]:[7,6,5,4,3,2,1,0],files=orientation==='white'?[0,1,2,3,4,5,6,7]:[7,6,5,4,3,2,1,0],selected=state.selectedSquare,legal=selected?chess.moves({square:selected,verbose:true}).map(m=>m.to):[],active=state.screen==='challenge-play'?state.challenge:state.session;let sources=[],targets=[];if(state.hintLevel&&state.screen==='challenge-play'){const sans=new Set(challengeOptions(state.challenge).keys()),moves=chess.moves({verbose:true}).filter(m=>sans.has(m.san));sources=moves.map(m=>m.from);if(state.hintLevel>1)targets=moves.map(m=>m.to);}else if(state.hintLevel&&state.session){const p=state.session.drill.positions[state.session.cursor];sources=[p?.from];if(state.hintLevel>1)targets=[p?.to];}return `<div class="board" role="grid">${ranks.flatMap((r,ri)=>files.map((f,fi)=>{const p=board[r][f],sq='abcdefgh'[f]+(8-r),dark=(r+f)%2===1,code=p?`${p.color}${p.type.toUpperCase()}`:'';return `<button class="square ${dark?'dark':'light'} ${selected===sq?'selected':''} ${legal.includes(sq)?'legal':''} ${sources.includes(sq)?'hint':''} ${targets.includes(sq)?'hint-target':''} ${active?.lastMove?.from===sq?'last-from':''} ${active?.lastMove?.to===sq?'last-to':''}" data-square="${sq}">${p?`<img class="piece" draggable="false" src="${PIECE_BASE}/${code}.svg" alt="${p.color==='w'?'White':'Black'} ${PIECE_NAMES[p.type]}">`:''}${fi===0?`<small class="rank">${8-r}</small>`:''}${ri===7?`<small class="file">${'abcdefgh'[f]}</small>`:''}</button>`;})).join('')}</div>`;}
+const delay=ms=>new Promise(r=>setTimeout(r,ms));
+function animateMove(from,to){const source=document.querySelector(`[data-square="${from}"] .piece`),target=document.querySelector(`[data-square="${to}"]`);if(!source||!target)return Promise.resolve();const a=source.getBoundingClientRect(),b=target.getBoundingClientRect(),ghost=source.cloneNode(true);ghost.classList.add('moving-piece');Object.assign(ghost.style,{left:`${a.left}px`,top:`${a.top}px`,width:`${a.width}px`,height:`${a.height}px`});source.style.opacity='0';document.body.appendChild(ghost);return new Promise(resolve=>{requestAnimationFrame(()=>requestAnimationFrame(()=>ghost.style.transform=`translate(${b.left-a.left}px,${b.top-a.top}px)`));setTimeout(()=>{ghost.remove();resolve();},MOVE_MS);});}
+function insightHtml(name){const x=openingInsight(name);return `<div class="insight"><b>Plan</b><p>${esc(x.plan)}</p><b>Pawn breaks</b><p>${esc(x.break)}</p><b>Watch for</b><p>${esc(x.watch)}</p></div>`;}
+function drillView(){const s=state.session,progress=Math.round(s.cursor/Math.max(1,s.drill.positions.length)*100),elapsed=Math.floor((Date.now()-s.promptStartedAt)/1000),timer=state.timerSeconds?`${Math.max(0,state.timerSeconds-elapsed)}s`:'Untimed';return appShell(`<main class="drill-page"><section class="drill-head"><button class="back" data-action="home">← Exit drill</button><div class="drill-meta"><span>${s.review?'MISTAKE REVIEW':esc(s.drill.line.openingName)}</span><b>${esc(s.drill.line.name)}</b></div><div class="progress-track"><i style="width:${progress}%"></i></div><span>${s.cursor}/${s.drill.positions.length} ply</span></section><section class="drill-grid"><div>${boardHtml(s.chess,state.orientation)}</div><aside class="coach ${s.complete?'complete':''}">${s.complete?`<div class="result-icon">✓</div><p class="eyebrow">${s.review?'REVIEW COMPLETE':'LINE COMPLETE'}</p><h2>${s.mistakes?'Nice recovery.':'Clean run.'}</h2><p>You played ${s.userMoves} moves with ${s.mistakes} mistakes.</p>${insightHtml(s.drill.line.openingName)}${s.mistakePositions.length?'<button class="secondary wide" data-action="review">Repeat weak positions</button>':''}<button class="primary wide" data-action="next">Drill another line →</button>`:`<p class="eyebrow">YOUR MOVE · ${s.drill.color.toUpperCase()} · ${timer}</p><h2>Find the repertoire move.</h2><p class="sequence">${s.drill.line.moves.slice(0,s.cursor).map((m,i)=>`<span class="${i===s.cursor-1?'last':''}">${m}</span>`).join(' ')||'Opening position'}</p><div class="feedback ${state.message?'show':''}">${state.message||'Select a piece, then its destination.'}</div><button class="secondary wide" data-action="hint">${state.hintLevel===0?'Highlight the piece':state.hintLevel===1?'Show destination':'Hint shown'}</button><button class="text-button" data-action="reveal">Reveal & continue</button>`}</aside></section></main>`);}
+function challengeView(){const c=state.challenge,o=challengeOptions(c);return appShell(`<main class="drill-page"><section class="drill-head"><button class="back" data-action="challenge">← Exit challenge</button><div class="drill-meta"><span>THEORY CHALLENGE · ${state.challengeDifficulty.toUpperCase()}</span><b>${esc(c.openingName)}</b></div><div class="progress-track"><i style="width:${Math.round(c.cursor/c.targetPly*100)}%"></i></div><span>${c.cursor}/${c.targetPly} ply</span></section><section class="drill-grid"><div>${boardHtml(c.chess,state.orientation)}</div><aside class="coach ${c.complete?'complete':''}">${c.complete?`<div class="result-icon">✓</div><p class="eyebrow">CHALLENGE COMPLETE</p><h2>${c.mistakes?'You adapted.':'Theory held.'}</h2><p>${esc(c.reason)}. ${c.correct} theoretical moves, ${c.mistakes} misses.</p><button class="primary wide" data-action="start-challenge">New random challenge →</button>`:`<p class="eyebrow">YOU ARE ${c.color.toUpperCase()}</p><h2>Stay inside theory.</h2><div class="challenge-badges"><span>${o.size} theory ${o.size===1?'move':'moves'}</span><span>Transpositions on</span></div><div class="feedback ${state.message?'show':''}">${state.message||'Play any documented move from this position.'}</div>${state.pendingOutOfBook?`<button class="primary wide" data-action="retry-book">Try a theory move</button><button class="secondary wide" data-action="continue-book">Continue anyway</button>`:`<button class="secondary wide" data-action="hint">${state.hintLevel===0?'Highlight valid pieces':'Show destinations'}</button>`}`}</aside></section></main>`);}
+function progressView(){const selected=workingLines().filter(l=>state.selected.has(l.id)),coverage=coverageForLines(selected,theoryIndex,state.positionStats),due=duePositionKeys(state.positionStats,selectedPositionKeys()).length,families=workingOpenings().map(o=>({o,lines:o.lines.filter(l=>state.selected.has(l.id))})).filter(x=>x.lines.length).map(x=>({...x,c:coverageForLines(x.lines,theoryIndex,state.positionStats)})).sort((a,b)=>a.c.mastery-b.c.mastery);return appShell(`<main class="page progress-page"><p class="eyebrow">POSITION-BASED LEARNING</p><h1>Your progress</h1><section class="stat-grid"><div><span>${coverage.practiced}/${coverage.positions}</span><small>positions seen</small></div><div><span>${due}</span><small>positions due</small></div><div><span>${coverage.mastery}%</span><small>estimated mastery</small></div></section><section class="progress-actions"><button class="primary" data-action="review" ${due?'':'disabled'}>Review due positions</button><button class="secondary" data-action="export-pgn">Export selected PGN</button><button class="secondary" data-action="export-data">Back up progress</button><label class="secondary file-button">Import PGN / backup<input id="import-file" type="file" accept=".pgn,.json,text/plain"></label></section><section class="progress-list"><div class="section-heading"><h2>Repertoire coverage</h2><button class="text-button" data-action="reset-stats">Reset progress</button></div>${families.length?families.map(({o,lines,c})=>`<div class="coverage-row"><span><b>${esc(o.name)}</b><small>${lines.length} selected lines · ${c.practiced}/${c.positions} positions seen · ${c.due} due</small></span><div class="mastery"><i style="width:${c.mastery}%"></i></div><strong>${c.mastery}%</strong></div>`).join(''):'<div class="empty"><span>♙</span><h3>No repertoire selected</h3><p>Choose openings to build your coverage map.</p></div>'}</section><section class="tools-note"><h2>Portable repertoire</h2><p>PGN imports become a Custom repertoire. JSON backup preserves selections, roles, and spaced-repetition history.</p></section></main>`);}
 
-function challengeLines(difficulty = state.challengeDifficulty) {
-  const allowed = difficulty === 'common' ? BEGINNER_FAMILIES : difficulty === 'varied' ? INTERMEDIATE_FAMILIES : null;
-  const perFamily = difficulty === 'common' ? 10 : difficulty === 'varied' ? 28 : Infinity;
-  return OPENINGS.filter(opening=>!allowed || allowed.has(opening.name)).flatMap(opening =>
-    opening.lines.filter(line=>line.moves.length >= 8).sort((a,b)=>a.moves.length-b.moves.length || a.name.localeCompare(b.name)).slice(0,perFamily).map(line=>({ ...line, openingId:opening.id, openingName:opening.name }))
-  );
-}
-
-function challengeSetupView() {
-  const configs = {
-    common:{title:'Common',subtitle:'Mainstream replies',body:'The opponent favors familiar openings and the most documented continuations.',count:challengeLines('common').length},
-    varied:{title:'Varied',subtitle:'Broader theory',body:'More opening families and sidelines, with occasional less-common responses.',count:challengeLines('varied').length},
-    wild:{title:'Unpredictable',subtitle:'Full catalog',body:'Any documented opening or reply can appear, with rare branches weighted equally.',count:challengeLines('wild').length},
-  };
-  return appShell(`<main class="challenge-setup page"><button class="back" data-action="home">← Back to repertoire</button><section class="challenge-intro"><p class="eyebrow">REAL-GAME PRACTICE</p><h1>Theory Challenge</h1><p>You get a random color. Play any move that stays inside documented opening theory while your opponent chooses its own theoretical replies. There is no preselected script—the position determines which branches remain possible.</p></section><section class="difficulty-picker"><div class="section-heading"><div><p class="eyebrow">OPPONENT DIFFICULTY</p><h2>How unpredictable should it be?</h2></div></div><div class="difficulty-grid">${Object.entries(configs).map(([id,config])=>`<button class="${state.challengeDifficulty===id?'active':''}" data-action="challenge-difficulty" data-id="${id}"><span class="difficulty-icon">${id==='common'?'♙':id==='varied'?'♞':'♛'}</span><b>${config.title}</b><small>${config.subtitle}</small><p>${config.body}</p><em>${config.count.toLocaleString()} eligible theory lines</em></button>`).join('')}</div><div class="challenge-start"><p><b>Each round randomizes your color.</b><br>The challenge ends after ${state.challengeDifficulty==='common'?5:state.challengeDifficulty==='varied'?7:9} full moves or when the documented branch ends.</p><button class="primary" data-action="start-challenge">Start challenge →</button></div></section></main>`);
-}
-
-function appShell(content) {
-  const totals = Object.values(state.stats).reduce((sum, s) => { const stat = sanitizeStat(s); sum.attempts += stat.attempts; sum.correct += stat.correct; return sum; }, { attempts: 0, correct: 0 });
-  const total = totals.attempts, correct = totals.correct;
-  return `<header class="topbar"><button class="brand" data-action="home"><span class="brand-mark">♞</span><span>Chess<span>Drill</span></span></button><nav><button class="nav-link ${state.screen==='library'?'active':''}" data-action="home">Repertoire</button><button class="nav-link ${state.screen.startsWith('challenge')?'active':''}" data-action="challenge">Theory Challenge</button><button class="nav-link ${state.screen==='progress'?'active':''}" data-action="progress">Progress</button></nav><div class="streak"><span>◆</span> ${correct}/${total || 0} moves</div></header>${content}`;
-}
-
-function libraryView() {
-  const catalog = levelCatalog();
-  const eligibleIds = new Set(catalog.flatMap(opening=>opening.lines.map(line=>line.id)));
-  const drillable = drillableLines(allLines(), state.selected, eligibleIds, state.side, state.maxPly);
-  const catalogLineCount = catalog.reduce((sum,opening)=>sum+opening.lines.length,0);
-  let visible = catalog.filter(opening => state.focus === 'all' || opening.color === state.focus);
-  const query = state.query.trim().toLowerCase();
-  if (query) visible = visible.filter(opening => opening.name.toLowerCase().includes(query) || opening.eco.toLowerCase().includes(query) || opening.lines.some(line => line.name.toLowerCase().includes(query)));
-  visible = [...visible].sort((a,b) => state.sort === 'name' ? a.name.localeCompare(b.name) : state.sort === 'lines' ? b.lines.length-a.lines.length || a.name.localeCompare(b.name) : a.eco.localeCompare(b.eco) || a.name.localeCompare(b.name));
-  return appShell(`<main class="page"><section class="hero"><div><p class="eyebrow">OPENING TRAINER</p><h1>Know your <em>next move.</em></h1><p>Build a focused repertoire, choose the exact variations you care about, and drill them until the right move feels automatic.</p></div><div class="hero-card"><span>${drillable.length}</span><small>lines ready to drill</small><button class="primary" data-action="start" ${drillable.length?'':'disabled'}>Start drill <b>→</b></button></div></section><section class="level-panel"><div><p class="eyebrow">STUDY LEVEL</p><h2>How much theory do you want?</h2><p>Lower levels hide rare opening families and deep sidelines. Your existing selections are always preserved.</p></div><div class="level-switch" role="group" aria-label="Study level">${['beginner','intermediate','advanced'].map(level=>`<button class="${state.level===level?'active':''}" data-action="level" data-id="${level}"><b>${level[0].toUpperCase()+level.slice(1)}</b><small>${level==='beginner'?'Core plans':level==='intermediate'?'Broader theory':'Complete catalog'}</small></button>`).join('')}</div></section>${recommendationsView()}<section class="workspace"><aside class="filters"><p class="label">TRAINING SETTINGS</p><label>Practice side<select id="side"><option value="repertoire" ${state.side==='repertoire'?'selected':''}>Opening repertoire side</option><option value="white" ${state.side==='white'?'selected':''}>White only</option><option value="black" ${state.side==='black'?'selected':''}>Black only</option></select></label><label>Maximum depth <span id="depthLabel">${state.maxPly} ply</span><input id="depth" type="range" min="4" max="30" step="2" value="${state.maxPly}"></label><div class="tip"><b>Smart rotation</b><p>New and missed lines come up most; clean runs are rested longer before they return.</p></div></aside><section class="library"><div class="section-heading"><div><p class="eyebrow">${catalog.length} OPENING FAMILIES · ${catalogLineCount.toLocaleString()} LINES</p><h2>Choose what to drill</h2></div><div class="selection-actions"><button data-action="select-visible">Select level</button><button data-action="clear">Clear</button></div></div><div class="catalog-tools"><label class="catalog-search"><span>⌕</span><input id="catalog-search" type="search" value="${esc(state.query)}" placeholder="Search openings, variations, or ECO…"></label><select id="focus" aria-label="Filter by side"><option value="all" ${state.focus==='all'?'selected':''}>All openings</option><option value="white" ${state.focus==='white'?'selected':''}>White to play</option><option value="black" ${state.focus==='black'?'selected':''}>Black to play</option></select><select id="sort" aria-label="Sort openings"><option value="eco" ${state.sort==='eco'?'selected':''}>ECO order</option><option value="name" ${state.sort==='name'?'selected':''}>Name A–Z</option><option value="lines" ${state.sort==='lines'?'selected':''}>Most variations</option></select><button class="short-lines-toggle ${state.showShortLines?'active':''}" data-action="toggle-short" aria-pressed="${state.showShortLines}"><span>${state.showShortLines?'✓':''}</span> Show lines under 4 moves</button></div><p class="result-count">Showing ${visible.length} opening ${visible.length===1?'family':'families'} · ${state.showShortLines?'Short sidelines included':'Short sidelines hidden; main lines retained'}</p><div class="opening-list">${visible.length?visible.map(openingCard).join(''):'<div class="no-results">No openings match those filters.</div>'}</div></section></section>${drillable.length?`<div class="mobile-start"><span>${drillable.length} line${drillable.length===1?'':'s'} ready</span><button class="primary" data-action="start">Start drill →</button></div>`:''}</main>`);
-}
-
-function recommendationsView() {
-  const recommendations = RECOMMENDATIONS.filter(item=>item.levels.includes(state.level)).map(item=>({ ...item, opening:OPENINGS.find(opening=>opening.name===item.name) })).filter(item=>item.opening);
-  return `<section class="recommended"><div class="section-heading"><div><p class="eyebrow">RECOMMENDED OPENINGS</p><h2>A strong place to start</h2></div><p>Balanced choices for ${state.level} study</p></div><div class="recommendation-grid">${recommendations.slice(0,6).map(({opening,reason})=>{const leveled=openingForLevel(opening)||opening;const ids=leveled.lines.map(line=>line.id);const added=ids.every(id=>state.selected.has(id));return `<article><span class="color-dot ${opening.color}">${opening.color==='white'?'W':'B'}</span><div><b>${esc(opening.name)}</b><p>${esc(reason)}</p><small>${leveled.lines.length} foundational ${leveled.lines.length===1?'line':'lines'}</small></div><button class="${added?'added':''}" data-action="recommend" data-id="${opening.id}">${added?'✓ Added':'+ Add'}</button></article>`}).join('')}</div></section>`;
-}
-
-function openingCard(opening) {
-  const expanded = state.expanded.has(opening.id);
-  const selectedCount = opening.lines.filter(l => state.selected.has(l.id)).length;
-  const allSelected = selectedCount === opening.lines.length;
-  const someSelected = selectedCount > 0 && !allSelected;
-  return `<article class="opening-card ${expanded?'expanded':''}"><div class="opening-summary"><button class="opening-toggle ${allSelected?'checked':''} ${someSelected?'partial':''}" data-action="toggle-opening" data-id="${opening.id}" aria-label="${allSelected?'Deselect':'Select'} all ${esc(opening.name)} lines" aria-pressed="${allSelected}"><span>✓</span></button><button class="opening-details" data-action="expand" data-id="${opening.id}"><span class="color-dot ${opening.color}">${opening.color==='white'?'W':'B'}</span><span class="opening-title"><b>${esc(opening.name)}</b><small>${opening.eco} · ${esc(opening.description)}</small></span><span class="line-count">${selectedCount}/${opening.lines.length} lines</span><span class="chevron">⌄</span></button></div>${expanded?`<div class="line-list"><div class="line-list-head"><span>VARIATION</span><span>MOVES</span><button data-action="toggle-opening" data-id="${opening.id}">${allSelected?'Deselect all':'Select all'}</button></div>${opening.lines.map(line => { const stat=state.stats[line.id]; return `<label class="line-row"><input type="checkbox" data-line="${line.id}" ${state.selected.has(line.id)?'checked':''}><span class="fake-check">✓</span><span><b>${esc(line.name)}</b><small>${line.moves.join(' ')}</small></span><span class="moves-count">${line.moves.length} ply</span><span class="accuracy">${pct(stat)===null?'New':pct(stat)+'%'}</span></label>`;}).join('')}</div>`:''}</article>`;
-}
-
-function startSession() {
-  const eligibleIds = new Set(levelCatalog().flatMap(opening=>opening.lines.map(line=>line.id)));
-  const available = drillableLines(allLines(), state.selected, eligibleIds, state.side, state.maxPly);
-  const line = weightedPick(available, state.stats);
-  if (!line) return;
-  const color = state.side === 'repertoire' ? line.repertoireColor : state.side;
-  const drill = createDrill(line, color, state.maxPly);
-  const userTurn = color === 'white' ? 'w' : 'b';
-  state.session = { drill, chess:new Chess(), cursor:0, userMoves:0, mistakes:0, complete:false, busy:drill.positions[0]?.turn !== userTurn, lastMove:null };
-  state.orientation = color;
-  state.selectedSquare = null;
-  state.message = '';
-  state.hint = false;
-  state.screen = 'drill';
-  render();
-  window.setTimeout(advanceOpponent, REPLY_PAUSE_MS);
-}
-
-async function advanceOpponent() {
-  const s = state.session;
-  if (!s || s.complete) return;
-  while (s.cursor < s.drill.positions.length && s.drill.positions[s.cursor].turn !== (s.drill.color === 'white' ? 'w' : 'b')) {
-    s.busy = true;
-    const position = s.drill.positions[s.cursor];
-    await animateMove(position.from, position.to);
-    if (state.session !== s) return;
-    s.chess.move(position.san);
-    s.lastMove = { from:position.from, to:position.to };
-    s.cursor += 1;
-    s.busy = false;
-    render();
-    if (s.cursor < s.drill.positions.length && s.drill.positions[s.cursor].turn !== (s.drill.color === 'white' ? 'w' : 'b')) await delay(REPLY_PAUSE_MS);
-  }
-  if (s.cursor >= s.drill.positions.length) finishLine();
-  render();
-}
-
-function finishLine() {
-  const s=state.session; if (!s || s.complete) return;
-  s.complete=true;
-  if(!s.userMoves) return;
-  const id=s.drill.line.id;
-  const old=sanitizeStat(state.stats[id]);
-  state.stats[id]={ attempts:old.attempts+s.userMoves, correct:old.correct+Math.max(0,s.userMoves-s.mistakes), completions:old.completions+1, streak:s.mistakes?0:old.streak+1, lastSeenAt:Date.now() };
-  save();
-}
-
-function startChallenge() {
-  const lines = challengeLines();
-  const color = Math.random() < .5 ? 'white' : 'black';
-  const targetPly = state.challengeDifficulty === 'common' ? 10 : state.challengeDifficulty === 'varied' ? 14 : 18;
-  state.challenge = { chess:new Chess(), candidates:lines, color, cursor:0, targetPly, correct:0, mistakes:0, complete:false, busy:color==='black', lastMove:null, openingName:'Unknown opening' };
-  state.session=null; state.orientation=color; state.selectedSquare=null; state.message=''; state.hint=false; state.screen='challenge-play';
-  render();
-  if (color === 'black') window.setTimeout(advanceChallengeOpponent, REPLY_PAUSE_MS);
-}
-
-function updateChallengeOpening(challenge) {
-  const names = [...new Set(challenge.candidates.map(line=>line.openingName))];
-  challenge.openingName = names.length === 1 ? names[0] : names.length < 4 ? names.join(' / ') : `${names.length} possible openings`;
-}
-
-async function advanceChallengeOpponent() {
-  const challenge=state.challenge;
-  if (!challenge || challenge.complete) return;
-  const options=theoryOptions(challenge.candidates,challenge.cursor);
-  const choice=chooseTheoryMove(options,state.challengeDifficulty);
-  if (!choice) return finishChallenge('Theory branch complete');
-  const move=challenge.chess.moves({verbose:true}).find(candidate=>candidate.san===choice.san);
-  if (!move) return finishChallenge('Theory branch complete');
-  challenge.busy=true;
-  await animateMove(move.from,move.to);
-  if(state.challenge!==challenge)return;
-  challenge.chess.move(choice.san);challenge.candidates=choice.candidates;challenge.cursor++;challenge.lastMove={from:move.from,to:move.to};challenge.busy=false;state.hint=false;updateChallengeOpening(challenge);render();
-  if(challenge.cursor>=challenge.targetPly)return finishChallenge('Target depth reached');
-  if(!theoryOptions(challenge.candidates,challenge.cursor).size)return finishChallenge('Theory branch complete');
-}
-
-function finishChallenge(reason) {
-  const challenge=state.challenge;if(!challenge||challenge.complete)return;
-  challenge.complete=true;challenge.busy=false;challenge.reason=reason;render();
-}
-
-function boardHtml(chess, orientation) {
-  const board=chess.board();
-  const ranks=orientation==='white'?[0,1,2,3,4,5,6,7]:[7,6,5,4,3,2,1,0];
-  const files=orientation==='white'?[0,1,2,3,4,5,6,7]:[7,6,5,4,3,2,1,0];
-  const selected=state.selectedSquare;
-  const legal=selected ? chess.moves({square:selected,verbose:true}).map(m=>m.to) : [];
-  const active=state.screen==='challenge-play'?state.challenge:state.session;
-  let hintSquares=[];
-  if(state.hint&&state.screen==='challenge-play'&&state.challenge){const sans=new Set(theoryOptions(state.challenge.candidates,state.challenge.cursor).keys());hintSquares=chess.moves({verbose:true}).filter(move=>sans.has(move.san)).map(move=>move.from);}
-  else if(state.hint&&state.session)hintSquares=[state.session.drill.positions[state.session.cursor]?.from];
-  return `<div class="board" role="grid" aria-label="Chess board">${ranks.flatMap((r,ri)=>files.map((f,fi)=>{ const piece=board[r][f]; const square='abcdefgh'[f]+(8-r); const dark=(r+f)%2===1; const hint=hintSquares.includes(square); const lastFrom=active?.lastMove?.from===square; const lastTo=active?.lastMove?.to===square; const pieceCode=piece?`${piece.color}${piece.type.toUpperCase()}`:''; return `<button class="square ${dark?'dark':'light'} ${selected===square?'selected':''} ${legal.includes(square)?'legal':''} ${hint?'hint':''} ${lastFrom?'last-from':''} ${lastTo?'last-to':''}" data-square="${square}" aria-label="${square}${piece?' '+(piece.color==='w'?'white ':'black ')+PIECE_NAMES[piece.type]:''}">${piece?`<img class="piece" draggable="false" src="https://lichess1.org/assets/piece/cburnett/${pieceCode}.svg" alt="${piece.color==='w'?'White':'Black'} ${PIECE_NAMES[piece.type]}">`:''}${fi===0?`<small class="rank">${8-r}</small>`:''}${ri===7?`<small class="file">${'abcdefgh'[f]}</small>`:''}</button>`;})).join('')}</div>`;
-}
-
-function delay(ms) { return new Promise(resolve => window.setTimeout(resolve, ms)); }
-
-function animateMove(from, to) {
-  const source = document.querySelector(`[data-square="${from}"] .piece`);
-  const target = document.querySelector(`[data-square="${to}"]`);
-  if (!source || !target) return Promise.resolve();
-  const start = source.getBoundingClientRect();
-  const end = target.getBoundingClientRect();
-  const ghost = source.cloneNode(true);
-  ghost.classList.add('moving-piece');
-  Object.assign(ghost.style, { left:`${start.left}px`, top:`${start.top}px`, width:`${start.width}px`, height:`${start.height}px` });
-  source.style.opacity = '0';
-  document.body.appendChild(ghost);
-  return new Promise(resolve => {
-    requestAnimationFrame(() => requestAnimationFrame(() => { ghost.style.transform = `translate(${end.left-start.left}px, ${end.top-start.top}px)`; }));
-    window.setTimeout(() => { ghost.remove(); resolve(); }, MOVE_MS);
-  });
-}
-
-function drillView() {
-  const s=state.session;
-  const progress=Math.round(s.cursor/Math.max(1,s.drill.positions.length)*100);
-  return appShell(`<main class="drill-page"><section class="drill-head"><button class="back" data-action="home">← Exit drill</button><div class="drill-meta"><span>${esc(s.drill.line.openingName)}</span><b>${esc(s.drill.line.name)}</b></div><div class="progress-track"><i style="width:${progress}%"></i></div><span>${s.cursor}/${s.drill.positions.length} ply</span></section><section class="drill-grid"><div class="board-wrap">${boardHtml(s.chess,state.orientation)}</div><aside class="coach ${s.complete?'complete':''}">${s.complete?`<div class="result-icon">✓</div><p class="eyebrow">LINE COMPLETE</p><h2>${s.mistakes?'Nice recovery.':'Clean run.'}</h2><p>You played ${s.userMoves} move${s.userMoves===1?'':'s'} with ${s.mistakes} mistake${s.mistakes===1?'':'s'}.</p><button class="primary wide" data-action="next">Drill another line →</button><button class="secondary wide" data-action="home">Back to repertoire</button>`:`<p class="eyebrow">YOUR MOVE · ${s.drill.color.toUpperCase()}</p><h2>Find the repertoire move.</h2><p class="sequence">${s.drill.line.moves.slice(0,s.cursor).map((m,i)=>`<span class="${i===s.cursor-1?'last':''}">${m}</span>`).join(' ') || 'Opening position'}</p><div class="feedback ${state.message?'show':''}">${state.message||'Select a piece, then its destination square.'}</div><button class="secondary wide" data-action="hint">${state.hint?'Hint active — piece highlighted':'Show hint'}</button><button class="text-button" data-action="reveal">Reveal & continue</button>`}</aside></section></main>`);
-}
-
-function challengeView() {
-  const c=state.challenge;
-  const progress=Math.min(100,Math.round(c.cursor/c.targetPly*100));
-  const choices=theoryOptions(c.candidates,c.cursor).size;
-  return appShell(`<main class="drill-page challenge-play"><section class="drill-head"><button class="back" data-action="challenge">← Exit challenge</button><div class="drill-meta"><span>THEORY CHALLENGE · ${state.challengeDifficulty.toUpperCase()}</span><b>${esc(c.openingName)}</b></div><div class="progress-track"><i style="width:${progress}%"></i></div><span>${c.cursor}/${c.targetPly} ply</span></section><section class="drill-grid"><div class="board-wrap">${boardHtml(c.chess,state.orientation)}</div><aside class="coach ${c.complete?'complete':''}">${c.complete?`<div class="result-icon">✓</div><p class="eyebrow">CHALLENGE COMPLETE</p><h2>${c.mistakes?'You adapted.':'Theory held.'}</h2><p>${esc(c.reason)}. You found ${c.correct} theoretical move${c.correct===1?'':'s'} with ${c.mistakes} miss${c.mistakes===1?'':'es'} as ${c.color}.</p><button class="primary wide" data-action="start-challenge">New random challenge →</button><button class="secondary wide" data-action="challenge">Change difficulty</button>`:`<p class="eyebrow">YOU ARE ${c.color.toUpperCase()}</p><h2>Stay inside theory.</h2><p class="challenge-context">The opponent chooses its own continuation. More than one response may be correct.</p><div class="challenge-badges"><span>${c.candidates.length} matching lines</span><span>${choices} legal theory ${choices===1?'move':'moves'}</span></div><div class="feedback ${state.message?'show':''}">${state.message||'Play any documented move from this position.'}</div><button class="secondary wide" data-action="hint">${state.hint?'Hint active — valid pieces highlighted':'Show piece hint'}</button>`}</aside></section></main>`);
-}
-
-function progressView() {
-  const lines=practicedLines(allLines(),state.stats);
-  const attempts=lines.reduce((n,l)=>n+sanitizeStat(state.stats[l.id]).attempts,0), correct=lines.reduce((n,l)=>n+sanitizeStat(state.stats[l.id]).correct,0);
-  return appShell(`<main class="page progress-page"><p class="eyebrow">TRAINING HISTORY</p><h1>Your progress</h1><section class="stat-grid"><div><span>${lines.length}</span><small>lines practiced</small></div><div><span>${attempts}</span><small>moves attempted</small></div><div><span>${attempts?Math.round(correct/attempts*100):'—'}${attempts?'%':''}</span><small>overall accuracy</small></div></section><section class="progress-list"><div class="section-heading"><h2>Line mastery</h2><button class="secondary" data-action="reset-stats">Reset progress</button></div>${lines.length?lines.sort((a,b)=>pct(state.stats[a.id])-pct(state.stats[b.id])).map(line=>{const n=pct(state.stats[line.id]); return `<div class="progress-row"><span><b>${esc(line.name)}</b><small>${esc(line.openingName)}</small></span><div class="mastery"><i style="width:${n}%"></i></div><strong>${n}%</strong></div>`}).join(''):'<div class="empty"><span>♙</span><h3>No drills completed yet</h3><p>Select some lines and play your first session.</p><button class="primary" data-action="home">Choose openings</button></div>'}</section></main>`);
-}
-
-async function tryMove(square) {
-  const s=state.session; if (!s || s.complete || s.busy) return;
-  const piece=s.chess.get(square); const turn=s.chess.turn();
-  if (!state.selectedSquare) {
-    if (piece?.color===turn) { state.selectedSquare=square; state.message=''; render(); }
-    return;
-  }
-  if (piece?.color===turn) { state.selectedSquare=square; render(); return; }
-  const move=parseMove(s.chess,state.selectedSquare,square);
-  if (!move) { state.selectedSquare=null; state.message='That piece cannot move there.'; render(); return; }
-  const expected=s.drill.positions[s.cursor];
-  if (move.from===expected.from && move.to===expected.to) {
-    s.busy=true; state.selectedSquare=null; state.message='Correct — keep going.'; state.hint=false; render();
-    await animateMove(move.from, move.to);
-    if (state.session !== s) return;
-    s.chess.move(move.san); s.lastMove={from:move.from,to:move.to}; s.cursor+=1; s.userMoves+=1; render();
-    if (s.cursor >= s.drill.positions.length) { s.busy=false; finishLine(); render(); return; }
-    await delay(REPLY_PAUSE_MS);
-    if (state.session === s) advanceOpponent();
-  } else {
-    s.mistakes+=1; s.userMoves+=1; state.selectedSquare=null; state.message='Not the repertoire move. The correct piece is highlighted.'; state.hint=true; render();
-  }
-}
-
-async function tryChallengeMove(square) {
-  const c=state.challenge;if(!c||c.complete||c.busy)return;
-  const piece=c.chess.get(square),turn=c.chess.turn();
-  if(!state.selectedSquare){if(piece?.color===turn){state.selectedSquare=square;state.message='';render();}return;}
-  if(piece?.color===turn){state.selectedSquare=square;render();return;}
-  const move=parseMove(c.chess,state.selectedSquare,square);
-  if(!move){state.selectedSquare=null;state.message='That piece cannot move there.';render();return;}
-  const options=theoryOptions(c.candidates,c.cursor);
-  const matching=options.get(move.san);
-  if(!matching){c.mistakes++;state.selectedSquare=null;state.message='Legal move, but it leaves the documented theory in this challenge. Try another continuation.';state.hint=true;render();return;}
-  c.busy=true;state.selectedSquare=null;state.message='Theory matched.';state.hint=false;render();
-  await animateMove(move.from,move.to);if(state.challenge!==c)return;
-  c.chess.move(move.san);c.candidates=matching;c.cursor++;c.correct++;c.lastMove={from:move.from,to:move.to};updateChallengeOpening(c);render();
-  if(c.cursor>=c.targetPly)return finishChallenge('Target depth reached');
-  if(!theoryOptions(c.candidates,c.cursor).size)return finishChallenge('Theory branch complete');
-  await delay(REPLY_PAUSE_MS);if(state.challenge===c)advanceChallengeOpponent();
-}
-
-function handleClick(event) {
-  const square=event.target.closest('[data-square]'); if (square) return state.screen==='challenge-play'?tryChallengeMove(square.dataset.square):tryMove(square.dataset.square);
-  const el=event.target.closest('[data-action]'); if (!el) return;
-  const action=el.dataset.action, id=el.dataset.id;
-  if(action==='home'){state.screen='library';state.session=null;state.challenge=null;}
-  if(action==='progress') state.screen='progress';
-  if(action==='challenge'){state.screen='challenge-setup';state.session=null;state.challenge=null;state.selectedSquare=null;state.message='';state.hint=false;}
-  if(action==='challenge-difficulty'){state.challengeDifficulty=id;save();}
-  if(action==='start-challenge')return startChallenge();
-  if(action==='expand'){state.expanded.has(id)?state.expanded.delete(id):state.expanded.add(id);save();}
-  if(action==='select-all'){allLines().forEach(l=>state.selected.add(l.id));save();}
-  if(action==='select-visible'){levelCatalog().forEach(opening=>opening.lines.forEach(line=>state.selected.add(line.id)));save();}
-  if(action==='clear'){state.selected.clear();save();}
-  if(action==='toggle-opening'){const full=OPENINGS.find(x=>x.id===id);const o=openingForLevel(full)||full;const all=o.lines.every(l=>state.selected.has(l.id));o.lines.forEach(l=>all?state.selected.delete(l.id):state.selected.add(l.id));save();}
-  if(action==='level'){state.level=id;state.query='';save();}
-  if(action==='toggle-short'){state.showShortLines=!state.showShortLines;save();}
-  if(action==='recommend'){const full=OPENINGS.find(x=>x.id===id);const o=openingForLevel(full)||full;const all=o.lines.every(l=>state.selected.has(l.id));o.lines.forEach(l=>all?state.selected.delete(l.id):state.selected.add(l.id));save();}
-  if(action==='start'||action==='next') return startSession();
-  if(action==='hint') state.hint=true;
-  if(action==='reveal'){const s=state.session;if(s.busy)return;const p=s.drill.positions[s.cursor];s.busy=true;state.message='Move revealed.';state.hint=false;render();animateMove(p.from,p.to).then(async()=>{if(state.session!==s)return;s.chess.move(p.san);s.lastMove={from:p.from,to:p.to};s.cursor++;s.userMoves++;s.mistakes++;render();await delay(REPLY_PAUSE_MS);if(state.session===s)advanceOpponent();});return;}
-  if(action==='reset-stats'&&confirm('Reset all ChessDrill progress?')){state.stats={};save();}
-  render();
-}
-
-function handleChange(event) {
-  if(event.target.matches('[data-line]')){event.target.checked?state.selected.add(event.target.dataset.line):state.selected.delete(event.target.dataset.line);save();render();}
-  if(event.target.id==='side'){state.side=event.target.value;save();render();}
-  if(event.target.id==='depth'){state.maxPly=Number(event.target.value);save();document.querySelector('#depthLabel').textContent=`${state.maxPly} ply`;}
-  if(event.target.id==='focus'){state.focus=event.target.value;save();render();}
-  if(event.target.id==='sort'){state.sort=event.target.value;save();render();}
-  if(event.target.id==='catalog-search'){
-    state.query=event.target.value;
-    const caret=event.target.selectionStart;
-    render();
-    requestAnimationFrame(()=>{const input=document.querySelector('#catalog-search');if(input){input.focus();input.setSelectionRange(caret,caret);}});
-  }
-}
-
+async function tryMove(square){const s=state.session;if(!s||s.complete||s.busy)return;const piece=s.chess.get(square),turn=s.chess.turn();if(!state.selectedSquare){if(piece?.color===turn){state.selectedSquare=square;state.message='';render();}return;}if(piece?.color===turn){state.selectedSquare=square;render();return;}const move=parseMove(s.chess,state.selectedSquare,square);if(!move){state.selectedSquare=null;state.message='That piece cannot move there.';render();return;}const expected=s.drill.positions[s.cursor],timedOut=state.timerSeconds&&Date.now()-s.promptStartedAt>state.timerSeconds*1000;if(move.from===expected.from&&move.to===expected.to&&!timedOut){recordPosition(s,true,state.hintLevel>0);s.busy=true;state.selectedSquare=null;state.message='Correct — keep going.';state.hintLevel=0;render();await animateMove(move.from,move.to);if(state.session!==s)return;s.chess.move(move.san);s.lastMove={from:move.from,to:move.to};s.cursor++;s.userMoves++;render();if(s.cursor>=s.drill.positions.length){s.busy=false;finishLine();render();return;}await delay(REPLY_PAUSE_MS);if(state.session===s)advanceOpponent();}else{recordPosition(s,false,state.hintLevel>0);s.mistakes++;s.userMoves++;state.selectedSquare=null;state.message=timedOut?'Time expired. The correct piece is highlighted.':'Not the repertoire move. The correct piece is highlighted.';state.hintLevel=Math.max(1,state.hintLevel);render();}}
+async function tryChallengeMove(square){const c=state.challenge;if(!c||c.complete||c.busy)return;const piece=c.chess.get(square),turn=c.chess.turn();if(!state.selectedSquare){if(piece?.color===turn){state.selectedSquare=square;state.message='';render();}return;}if(piece?.color===turn){state.selectedSquare=square;render();return;}const move=parseMove(c.chess,state.selectedSquare,square);if(!move){state.selectedSquare=null;state.message='That piece cannot move there.';render();return;}if(!challengeOptions(c).get(move.san)){c.mistakes++;state.selectedSquare=null;state.pendingOutOfBook=move;state.message='That legal move leaves the documented repertoire. Retry or continue and see whether it transposes back.';render();return;}await acceptChallengeMove(c,move);}
+async function acceptChallengeMove(c,move){c.busy=true;state.selectedSquare=null;state.message='Theory matched.';state.hintLevel=0;state.pendingOutOfBook=null;render();await animateMove(move.from,move.to);if(state.challenge!==c)return;c.chess.move(move);c.cursor++;c.correct++;c.lastMove={from:move.from,to:move.to};updateChallengeOpening(c);render();if(c.cursor>=c.targetPly)return finishChallenge('Target depth reached');if(!challengeOptions(c).size)return finishChallenge('Theory branch complete');await delay(REPLY_PAUSE_MS);if(state.challenge===c)advanceChallengeOpponent();}
+function download(name,text,type='text/plain'){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([text],{type}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
+function handleClick(e){const square=e.target.closest('[data-square]');if(square)return state.screen==='challenge-play'?tryChallengeMove(square.dataset.square):tryMove(square.dataset.square);const el=e.target.closest('[data-action]');if(!el)return;const {action,id}=el.dataset;if(action==='home'){state.screen='library';state.session=null;state.challenge=null;}if(action==='progress')state.screen='progress';if(action==='challenge'){state.screen='challenge-setup';state.challenge=null;state.session=null;}if(action==='challenge-difficulty'){state.challengeDifficulty=id;save();}if(action==='start-challenge')return startChallenge();if(action==='expand'){state.expanded.has(id)?state.expanded.delete(id):state.expanded.add(id);save();}if(action==='select-visible'){levelCatalog().forEach(o=>o.lines.forEach(l=>state.selected.add(l.id)));save();}if(action==='clear'){state.selected.clear();save();}if(action==='toggle-opening'||action==='recommend'){const full=workingOpenings().find(o=>o.id===id),o=openingForLevel(full)||full,all=o.lines.every(l=>state.selected.has(l.id));o.lines.forEach(l=>all?state.selected.delete(l.id):state.selected.add(l.id));save();}if(action==='level'){state.level=id;state.query='';save();}if(action==='toggle-short'){state.showShortLines=!state.showShortLines;save();}if(action==='start'||action==='next')return startSession();if(action==='review')return startSession(true);if(action==='hint')state.hintLevel=Math.min(2,state.hintLevel+1);if(action==='reveal'){const s=state.session;if(s.busy)return;const p=s.drill.positions[s.cursor];recordPosition(s,false,true);s.busy=true;state.message='Move revealed.';state.hintLevel=0;render();animateMove(p.from,p.to).then(async()=>{if(state.session!==s)return;s.chess.move(p.san);s.lastMove={from:p.from,to:p.to};s.cursor++;s.userMoves++;s.mistakes++;render();await delay(REPLY_PAUSE_MS);if(state.session===s)advanceOpponent();});return;}if(action==='retry-book'){state.pendingOutOfBook=null;state.message='Choose a documented continuation.';state.hintLevel=1;}if(action==='continue-book'){const c=state.challenge,move=state.pendingOutOfBook;state.pendingOutOfBook=null;if(move)return acceptChallengeMove(c,move);}if(action==='export-pgn')download('chessdrill-repertoire.pgn',linesToPgn(workingLines().filter(l=>state.selected.has(l.id))),'application/x-chess-pgn');if(action==='export-data')download('chessdrill-backup.json',JSON.stringify(JSON.parse(localStorage.getItem(STORAGE_KEY)),null,2),'application/json');if(action==='reset-stats'&&confirm('Reset all ChessDrill progress?')){state.stats={};state.positionStats={};save();}render();}
+function handleChange(e){const t=e.target;if(t.matches('[data-line]')){t.checked?state.selected.add(t.dataset.line):state.selected.delete(t.dataset.line);save();render();}if(t.matches('[data-role]')){state.lineRoles[t.dataset.role]=t.value;save();}if(t.id==='side'){state.side=t.value;save();}if(t.id==='timer'){state.timerSeconds=Number(t.value);save();}if(t.id==='focus'){state.focus=t.value;save();render();}if(t.id==='sort'){state.sort=t.value;save();render();}if(t.id==='catalog-search'){state.query=t.value;const caret=t.selectionStart;render();requestAnimationFrame(()=>{const input=document.querySelector('#catalog-search');if(input){input.focus();input.setSelectionRange(caret,caret);}});}if(t.id==='import-file'&&t.files[0]){const reader=new FileReader();reader.onload=()=>{try{const text=String(reader.result);if(t.files[0].name.endsWith('.json')){const d=JSON.parse(text);state.stats=d.stats||{};state.positionStats=d.positionStats||{};state.lineRoles=d.lineRoles||{};state.customLines=d.customLines||[];state.selected=new Set(d.selected||[]);}else{const lines=parsePgnCollection(text,new Set(workingLines().map(l=>l.id)));state.customLines.push(...lines);lines.forEach(l=>state.selected.add(l.id));state.expanded.add('custom-repertoire');}rebuildIndex();save();render();}catch{alert('That file could not be imported.');}};reader.readAsText(t.files[0]);}}
 function render(){document.querySelector('#app').innerHTML=state.screen==='drill'?drillView():state.screen==='challenge-play'?challengeView():state.screen==='challenge-setup'?challengeSetupView():state.screen==='progress'?progressView():libraryView();}
 document.addEventListener('click',handleClick);document.addEventListener('change',handleChange);document.addEventListener('input',handleChange);render();
