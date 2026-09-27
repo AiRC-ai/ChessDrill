@@ -4,6 +4,7 @@ import { fetchRecentGames as fetchChessCom, normalizeUsername as normalizeChessC
 import { fetchRecentLichessGames as fetchLichess, normalizeLichessUsername as normalizeLichess, validateLichessUsername as validateLichess } from './movemirror/lichess.ts';
 import { buildDeepReport } from './movemirror/deep-report.ts';
 import { applyEngineAnalysis } from './movemirror/engine-insights.ts';
+import { openSampleGame, reviewPgnFormView } from './review.js';
 
 const STORAGE_KEY = 'chess-studio-analysis-v1';
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
@@ -18,8 +19,8 @@ const safeUrl = value => {
 function readStored() {
   try {
     const data = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-    return {report: data.report || null, history: Array.isArray(data.history) ? data.history.slice(0, 8) : []};
-  } catch { return {report: null, history: []}; }
+    return {report: data.report || null, history: Array.isArray(data.history) ? data.history.slice(0, 8) : [], games: Array.isArray(data.games) ? data.games.slice(0, 8) : []};
+  } catch { return {report: null, history: [], games: []}; }
 }
 
 const stored = readStored();
@@ -30,7 +31,7 @@ export const analysis = {
   filter: 'all',
   report: stored.report,
   history: stored.history,
-  games: [],
+  games: stored.games,
   busy: false,
   engineBusy: false,
   progress: '',
@@ -58,7 +59,9 @@ function saveReport(report) {
   }
   analysis.history = analysis.history.slice(0, 8);
   analysis.report = report;
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify({report, history: analysis.history})); }
+  const recentUrls = new Set(report.recentGames.map(game=>game.url));
+  const games = analysis.games.filter(game=>recentUrls.has(game.url)).slice(0,8);
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify({report, history: analysis.history, games})); }
   catch { /* A full browser storage quota should not prevent a report from appearing. */ }
 }
 
@@ -96,7 +99,8 @@ function reportView(report) {
     <section class="analysis-panel"><div class="analysis-section-head"><div><p class="eyebrow">TURN INSIGHT INTO HABIT</p><h3>Four-week practice plan</h3></div><button class="secondary" data-action="toggle-plan">${analysis.showPlan ? 'Hide plan' : 'Show plan'}</button></div><p>${esc(plan.headline)}</p>${analysis.showPlan ? `<div class="plan-grid">${plan.plan.map(week => `<article><small>WEEK ${week.week}</small><h4>${esc(week.title)}</h4><b>${esc(week.focus)}</b><ul>${week.sessions.map(session => `<li>${esc(session)}</li>`).join('')}</ul><p>${esc(week.checkpoint)}</p></article>`).join('')}</div>` : ''}</section>
     ${engine ? `<section class="analysis-panel"><div class="analysis-section-head"><div><p class="eyebrow">STOCKFISH 19 LITE · LOCAL BROWSER ANALYSIS</p><h3>Critical decisions</h3></div><button class="primary" data-action="train-moments" ${engine.criticalMoments.length?'':'disabled'}>Practice these positions →</button></div><p>${engine.movesAnalyzed} decisions from ${engine.gamesAnalyzed} ${engine.gamesAnalyzed===1?'game':'games'} · ${engine.mistakes} ${engine.mistakes===1?'mistake':'mistakes'} · ${engine.blunders} ${engine.blunders===1?'blunder':'blunders'}</p><div class="evidence-list">${engine.criticalMoments.slice(0, 8).map(moment => `<article><span class="moment-tag">${esc(moment.classification)}</span><div><b>${esc(moment.playedMove)} → ${esc(moment.bestMoveSan)}</b><small>Move ${moment.moveNumber} against ${esc(moment.opponent)} · ${esc(moment.phase)} · ${Math.round(moment.centipawnLoss)} cp lost</small><p>${esc(moment.reason)}</p></div><a href="${safeUrl(moment.gameUrl)}" target="_blank" rel="noopener noreferrer">Game ↗</a></article>`).join('')}</div></section>` : `<section class="engine-panel"><div><p class="eyebrow">GO ONE LEVEL DEEPER</p><h3>Check your decisions with Stockfish</h3><p>Analyze up to 48 decisions in three recent games. The engine runs in your browser; positions stay on your device.${analysis.games.length?'':' Reanalyze this account to enable the engine for a saved report.'}</p></div><button class="primary" data-action="run-engine" ${analysis.games.length && !analysis.engineBusy ? '' : 'disabled'}>${analysis.engineBusy ? `Checking positions… ${analysis.enginePercent}%` : 'Run local engine →'}</button></section>`}
     <section class="analysis-panel"><p class="eyebrow">EVIDENCE FROM YOUR GAMES</p><h3>Moments worth reviewing</h3><div class="evidence-list">${report.trainingPositions.slice(0, 8).map(position => `<article><span class="moment-tag">${esc(position.category)}</span><div><b>Move ${position.moveNumber} · ${esc(position.opening)}</b><small>${esc(position.color)} against ${esc(position.opponent)} · played ${esc(position.playedMove)}</small><p>${esc(position.reason)}</p></div><a href="${safeUrl(position.gameUrl)}" target="_blank" rel="noopener noreferrer">Game ↗</a></article>`).join('') || '<p>No repeated tactical evidence in this sample. Try a larger sample.</p>'}</div></section>
-    <section class="analysis-panel"><p class="eyebrow">AUDIT TRAIL</p><h3>Games in this sample</h3><div class="report-table-wrap"><table><thead><tr><th>Result</th><th>Opponent</th><th>Color</th><th>Format</th><th>Opening</th><th>Date</th><th>Game</th></tr></thead><tbody>${report.recentGames.map(game => `<tr><td><span class="result-pill ${esc(game.outcome)}">${esc(game.outcome)}</span></td><td>${esc(game.opponent)} <small>${game.opponentRating}</small></td><td>${esc(game.color)}</td><td>${esc(game.timeClass)}</td><td>${esc(game.opening)}</td><td>${date(game.endTime)}</td><td><a href="${safeUrl(game.url)}" target="_blank" rel="noopener noreferrer">Open ↗</a></td></tr>`).join('')}</tbody></table></div></section>
+    <section class="analysis-panel"><div class="analysis-section-head"><div><p class="eyebrow">FROM DATA TO DECISIONS</p><h3>Game review lab</h3></div><span>On-demand engine review</span></div><p>Choose a game below to replay every move, check each decision with Stockfish, and save your missed positions to a personal practice deck.</p></section>
+    <section class="analysis-panel"><p class="eyebrow">AUDIT TRAIL</p><h3>Games in this sample</h3><div class="report-table-wrap"><table><thead><tr><th>Result</th><th>Opponent</th><th>Color</th><th>Format</th><th>Opening</th><th>Date</th><th>Review</th><th>Game</th></tr></thead><tbody>${report.recentGames.map(game => `<tr><td><span class="result-pill ${esc(game.outcome)}">${esc(game.outcome)}</span></td><td>${esc(game.opponent)} <small>${game.opponentRating}</small></td><td>${esc(game.color)}</td><td>${esc(game.timeClass)}</td><td>${esc(game.opening)}</td><td>${date(game.endTime)}</td><td><button class="review-table-button" data-action="review-game" data-url="${esc(game.url)}" ${analysis.games.some(item=>item.url===game.url)?'':'disabled title="Analyze this account again to load its PGN"'}>Review →</button></td><td><a href="${safeUrl(game.url)}" target="_blank" rel="noopener noreferrer">Open ↗</a></td></tr>`).join('')}</tbody></table></div></section>
   </section>`;
 }
 
@@ -108,6 +112,7 @@ export function analysisView() {
   return `<main class="page analysis-page"><section class="analysis-hero"><div><p class="eyebrow">MOVE MIRROR · GAME ANALYSIS</p><h1>Find the pattern.<br><em>Train the fix.</em></h1><p>Enter your public Chess.com or Lichess username. We'll replay recent games, identify repeatable strengths and weaknesses, then build a practical training queue.</p></div><div class="analysis-hero-visual" aria-hidden="true"><span class="visual-piece">♞</span><span class="visual-label">YOUR GAMES → YOUR NEXT MOVE</span><div class="visual-squares">${Array.from({length:16},(_,i)=>`<i class="${[5,6,9,10].includes(i)?'lit':''}"></i>`).join('')}</div></div></section>
     <form id="analysis-form" class="analysis-form"><div class="analysis-form-title"><div><p class="eyebrow">START WITH THE EVIDENCE</p><h2>Analyze a player</h2></div><small>Public games only · No account connection</small></div><div class="analysis-form-grid"><label>Platform<select id="analysis-platform"><option value="chesscom" ${analysis.platform === 'chesscom'?'selected':''}>Chess.com</option><option value="lichess" ${analysis.platform === 'lichess'?'selected':''}>Lichess</option></select></label><label>Username<input id="analysis-username" required autocomplete="off" spellcheck="false" placeholder="Your username" value="${esc(analysis.username)}"></label><label>Recent games<select id="analysis-count">${[10,20,30,50,100].map(n => `<option value="${n}" ${analysis.count === n?'selected':''}>${n} games</option>`).join('')}</select></label><label>Format<select id="analysis-filter">${formats[analysis.platform].map(([value,label])=>`<option value="${value}" ${analysis.filter===value?'selected':''}>${label}</option>`).join('')}</select></label></div><div class="analysis-form-bottom"><span>Standard chess only. Your games are analyzed in this browser.</span><div>${analysis.busy ? '<button class="secondary" type="button" data-action="cancel-analysis">Cancel</button>' : ''}<button class="primary" type="submit" ${analysis.busy?'disabled':''}>${analysis.busy?'Analyzing…':'Analyze games →'}</button></div></div>${analysis.busy ? `<div class="analysis-progress" role="status"><b>${esc(analysis.progress)}</b><span>${analysis.progressPercent}%</span><div><i style="width:${analysis.progressPercent}%"></i></div></div>` : ''}${analysis.error ? `<p class="analysis-error" role="alert">${esc(analysis.error)}</p>` : ''}</form>
     ${analysis.busy ? '' : analysis.report ? reportView(analysis.report) : `<section class="analysis-empty"><div><span>01</span><h3>Spot what repeats</h3><p>Measure opening stability, piece safety, game phases, and how you convert advantages.</p></div><div><span>02</span><h3>Get a focused queue</h3><p>Follow puzzle themes matched to your games, with direct Chess.com or Lichess links.</p></div><div><span>03</span><h3>Practice with purpose</h3><p>Take recurring openings straight into ChessDrill and revisit due positions.</p></div></section>`}
+    ${reviewPgnFormView()}
     <p class="analysis-privacy">MoveMirror's pattern signals describe this sample, not a full engine verdict. Chess.com or Lichess may rate-limit public requests. Reports saved on this device can be cleared with your browser's site data.</p>
   </main>`;
 }
@@ -128,6 +133,11 @@ export function handleAnalysisAction(element) {
     case 'print-report': window.print(); return true;
     case 'study-opening': studyOpening(element.dataset.opening); return true;
     case 'train-moments': startMoments(); return true;
+    case 'review-game': {
+      const game = analysis.games.find(item=>item.url===element.dataset.url);
+      if (game) openSampleGame(game,analysis.report.username);
+      return true;
+    }
     case 'next-moment': startMoments(puzzle.index + 1); return true;
     case 'hint-moment': puzzle.hint = Math.min(2, puzzle.hint + 1); render(); return true;
     case 'reveal-moment': puzzle.feedback = `The engine prefers ${activeMoment()?.bestMoveSan || 'the highlighted move'}.`; puzzle.hint = 2; puzzle.solved = true; render(); return true;

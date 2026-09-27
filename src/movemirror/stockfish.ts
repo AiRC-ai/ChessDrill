@@ -1,4 +1,5 @@
 import { Chess, type Color, type Move, type PieceSymbol } from "chess.js"
+import { moveInsight, uciLineToSan, type GameReview, type ReviewPly } from "./game-review"
 
 import type {
   ChessGame,
@@ -503,6 +504,75 @@ export async function analyzeGamesWithEngine(
       })
     }
     return summarizeEngineMoments(moments, depth)
+  } finally {
+    bus.engine.postMessage("quit")
+    bus.engine.terminate()
+  }
+}
+
+// One search per board position keeps adjacent move evaluations comparable and
+// makes a whole-game review much cheaper than searching every move twice.
+export async function analyzeFullGame(
+  source: GameReview,
+  options: { depth?: number; signal?: AbortSignal; onProgress?: (done: number, total: number) => void } = {},
+): Promise<GameReview> {
+  const depth = options.depth ?? 9
+  if (![8, 9, 12].includes(depth)) throw new Error("Choose a supported engine depth.")
+  const checkedPlies = Math.min(source.plies.length, 160)
+  if (!checkedPlies) throw new Error("This game has no moves to review.")
+  throwIfAborted(options.signal)
+  const bus = await startEngine()
+  const plies: ReviewPly[] = source.plies.map(ply => ({
+    ply: ply.ply, number: ply.number, color: ply.color, san: ply.san,
+    uci: ply.uci, beforeFen: ply.beforeFen, afterFen: ply.afterFen, phase: ply.phase,
+  }))
+  const final = new Chess()
+  final.loadPgn(source.pgn, { strict: false })
+  let previous: SearchResult | null = null
+
+  try {
+    bus.engine.postMessage("ucinewgame")
+    for (let index = 0; index <= checkedPlies; index++) {
+      throwIfAborted(options.signal)
+      const fen = index === 0 ? plies[0].beforeFen : plies[index - 1].afterFen
+      const board = new Chess(fen)
+      const terminal = index === source.plies.length && final.isGameOver()
+      const result: SearchResult = terminal ? {
+        bestMove: "(none)",
+        scoreCp: final.isCheckmate() ? -100_000 : 0,
+        depth,
+        pv: [],
+      } : await searchPosition(bus, fen, depth, options.signal)
+
+      if (index > 0 && previous) {
+        const ply = plies[index - 1]
+        const loss = previous.bestMove === ply.uci ? 0
+          : Math.max(0, Math.min(2_000, previous.scoreCp + result.scoreCp))
+        ply.bestMove = previous.bestMove
+        ply.bestSan = sanFromUci(ply.beforeFen, previous.bestMove)
+        ply.bestLine = uciLineToSan(ply.beforeFen, previous.pv, 6)
+        ply.evalBefore = ply.color === "w" ? previous.scoreCp : -previous.scoreCp
+        ply.evalAfter = board.turn() === "w" ? result.scoreCp : -result.scoreCp
+        ply.loss = loss
+        ply.classification = classifyCentipawnLoss(loss)
+        if (loss >= 60 && /^[a-h][1-8][a-h][1-8][qrbn]?$/.test(result.bestMove)) {
+          try {
+            const replyBoard = new Chess(ply.afterFen)
+            const reply = replyBoard.move({
+              from: result.bestMove.slice(0, 2), to: result.bestMove.slice(2, 4),
+              ...(result.bestMove.length > 4 ? { promotion: result.bestMove.slice(4, 5) } : {}),
+            })
+            ply.replySan = reply.san
+            ply.replyTactic = replyBoard.isCheckmate() ? "mate"
+              : reply.isCapture() ? "capture" : replyBoard.isCheck() ? "check" : undefined
+          } catch { /* An incomplete PV should not stop the review. */ }
+        }
+        ply.insight = moveInsight(ply)
+        options.onProgress?.(index, checkedPlies)
+      }
+      previous = result
+    }
+    return { ...source, plies, depth, checkedPlies, completedAt: Date.now() }
   } finally {
     bus.engine.postMessage("quit")
     bus.engine.terminate()
