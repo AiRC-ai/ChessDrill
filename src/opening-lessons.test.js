@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { OPENINGS } from './openings.js';
 import { OPENING_LESSONS, lessonPosition, matchingLessonLine } from './opening-lessons.js';
+import { handleLessonAction } from './opening-lessons-ui.js';
 
 describe('guided opening lessons', () => {
   it('teaches legal lines and asks legal, side-correct recall questions', () => {
@@ -27,5 +28,35 @@ describe('guided opening lessons', () => {
       expect(line.repertoireColor).toBe(lesson.color);
       expect(line.moves.slice(0, lesson.moves.length)).toEqual(lesson.moves.map(([san]) => san));
     }
+  });
+
+  it('moves from a lesson through recall into the matching drill and saves completion', () => {
+    vi.stubGlobal('window', { scrollTo:vi.fn() });
+    try {
+      const state = { screen:'dashboard', selected:new Set(), expanded:new Set(), lessonCompleted:{}, lessonFilter:'all' };
+      const render = vi.fn(), save = vi.fn(), startSession = vi.fn();
+      const context = { state, render, save, startSession, openings:() => OPENINGS };
+      const act = (action, id) => handleLessonAction({ dataset:{ action, id } }, context);
+      expect(act('lessons')).toBe(true);
+      expect(state.screen).toBe('lessons');
+      act('open-lesson','italian');
+      expect(state.screen).toBe('lesson');
+      act('lesson-step', String(OPENING_LESSONS[0].moves.length));
+      act('lesson-next');
+      expect(state.lesson.mode).toBe('quiz');
+      act('lesson-answer','Bb5');
+      expect(state.lesson.answered).toBe(false);
+      act('lesson-answer','Bc4');
+      expect(state.lesson.answered).toBe(true);
+      act('lesson-quiz-next');
+      act('lesson-answer','c3');
+      act('lesson-quiz-next');
+      expect(state.lesson.mode).toBe('done');
+      expect(state.lessonCompleted.italian).toBeGreaterThan(0);
+      expect(save).toHaveBeenCalled();
+      act('lesson-drill');
+      expect(state.selected.has(startSession.mock.lastCall[1].id)).toBe(true);
+      expect(startSession.mock.lastCall[1].openingName).toBe('Italian Game');
+    } finally { vi.unstubAllGlobals(); }
   });
 });

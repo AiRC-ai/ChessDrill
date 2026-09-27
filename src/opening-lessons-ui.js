@@ -58,7 +58,8 @@ export function lessonDetailView(state, appShell, boardHtml, esc) {
   </main>`);
 }
 
-export function handleLessonAction({ action, id }, { state, render, save, startSession, openings }) {
+export function handleLessonAction(element, { state, render, save, startSession, openings }) {
+  const { action, id } = element.dataset;
   if (action === 'lessons') {
     state.screen = 'lessons';
     state.session = null;
