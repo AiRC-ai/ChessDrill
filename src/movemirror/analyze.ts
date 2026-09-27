@@ -108,7 +108,7 @@ function titleCase(value: string) {
   return value
     .replace(/([a-z])([A-Z])/g, "$1 $2")
     .replace(/[_-]+/g, " ")
-    .replace(/\b\w/g, (letter) => letter.toUpperCase())
+    .replace(/(^|[\s:])(\p{L})/gu, (_, boundary, letter: string) => boundary + letter.toUpperCase())
 }
 
 function openingName(game: ChessGame, headers: Record<string, string>) {
