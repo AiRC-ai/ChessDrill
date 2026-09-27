@@ -7,19 +7,17 @@ android {
     compileSdk 35
 
     defaultConfig {
-        applicationId 'com.leglerisaac.chessstudio.preview'
+        applicationId 'com.leglerisaac.chessstudio'
         minSdk 26
         targetSdk 35
         versionCode 1
-        versionName '0.1.0-preview'
+        versionName '0.1.0'
     }
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
-
-    sourceSets.main.assets.srcDir(layout.buildDirectory.dir('generated/webAssets'))
 }
 
 dependencies {
@@ -33,10 +31,9 @@ def buildWebsite = tasks.register('buildWebsite', Exec) {
 
 def copyWebsite = tasks.register('copyWebsite', Copy) {
     dependsOn buildWebsite
-    from rootProject.file('../dist')
-    into layout.buildDirectory.dir('generated/webAssets/web')
+    from(rootProject.file('../dist')) { into 'web' }
+    into layout.buildDirectory.dir('generated/webAssets')
 }
 
-tasks.configureEach {
-    if (name.startsWith('merge') && name.endsWith('Assets')) dependsOn copyWebsite
-}
+// Passing the task itself tells Gradle every asset consumer about its dependency.
+android.sourceSets.main.assets.srcDir(copyWebsite)
