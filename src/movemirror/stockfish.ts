@@ -555,6 +555,7 @@ export async function analyzeFullGame(
         ply.evalAfter = board.turn() === "w" ? result.scoreCp : -result.scoreCp
         ply.loss = loss
         ply.classification = classifyCentipawnLoss(loss)
+        ply.mateThreat = result.scoreCp >= 50_000 && previous.scoreCp > -50_000
         if (loss >= 60 && /^[a-h][1-8][a-h][1-8][qrbn]?$/.test(result.bestMove)) {
           try {
             const replyBoard = new Chess(ply.afterFen)

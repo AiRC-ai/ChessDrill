@@ -1,6 +1,6 @@
 import { afterEach, expect, it } from "vitest"
 
-import { reviewFromGame, reviewFromPgn, reviewSummary, uciLineToSan } from "./game-review"
+import { moveInsight, reviewFromGame, reviewFromPgn, reviewSummary, uciLineToSan } from "./game-review"
 import { analyzeFullGame } from "./stockfish"
 
 const pgn = `[Event "Fool's mate"]
@@ -72,4 +72,15 @@ it("scores adjacent positions from the moving side and handles terminal mate", a
   expect(result.plies[2]).toMatchObject({loss:320,classification:"Blunder",evalAfter:-400})
   expect(result.plies[3]).toMatchObject({loss:0,classification:"Best",evalAfter:-100000})
   expect(reviewSummary(result)).toMatchObject({checked:2,mistakes:1,blunders:1})
+})
+
+it("labels a forced mate without presenting a capped mate score as ordinary pawn loss", () => {
+  const review = reviewFromGame(game,"Me")
+  review.plies[2] = {...review.plies[2], loss:2000,mateThreat:true,
+    classification:"Blunder",bestSan:"e4",bestLine:["e4","Nf6"],replySan:"Qh4#",replyTactic:"mate"}
+  expect(moveInsight(review.plies[2])).toContain("allowed a forced mate")
+  expect(moveInsight(review.plies[2])).not.toContain("20.0 pawns")
+  const summary = reviewSummary(review)
+  expect(summary.mateThreats).toBe(1)
+  expect(summary.averageLoss).toBe(null)
 })

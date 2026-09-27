@@ -19,6 +19,7 @@ export interface ReviewPly {
   evalBefore?: number // White's perspective, in centipawns.
   evalAfter?: number
   loss?: number // The moving side's perspective.
+  mateThreat?: boolean
   classification?: EngineMoveClassification
   insight?: string
 }
@@ -135,6 +136,7 @@ export function moveInsight(ply: ReviewPly) {
     ? ` The strongest reply is ${ply.replySan}, ${ply.replyTactic === "mate" ? "which ends the game" : ply.replyTactic === "capture" ? "a capture" : "a check"}.`
     : ""
   if (ply.classification === "Inaccuracy") return `${ply.san} gave up about ${shift} of evaluation. Compare it with ${best}.${line}`
+  if (ply.mateThreat) return `${ply.san} allowed a forced mate at this search depth. ${best} avoided it.${reply}${line}`
   if (ply.classification === "Mistake" || ply.classification === "Blunder") {
     const edge = ply.evalBefore !== undefined && ply.evalAfter !== undefined
       && (ply.color === "w" ? ply.evalBefore >= 200 && ply.evalAfter < 80 : ply.evalBefore <= -200 && ply.evalAfter > -80)
@@ -147,6 +149,7 @@ export function moveInsight(ply: ReviewPly) {
 export function reviewSummary(review: GameReview) {
   const checked = review.plies.filter(ply => ply.classification && ply.color === review.color)
   const errors = checked.filter(ply => (ply.loss ?? 0) >= 60)
+  const numeric = checked.filter(ply => !ply.mateThreat)
   const sorted = [...errors].sort((a, b) => (b.loss ?? 0) - (a.loss ?? 0))
   const phases = (["Opening", "Middlegame", "Endgame"] as EnginePhase[]).map(phase => ({
     phase,
@@ -158,7 +161,8 @@ export function reviewSummary(review: GameReview) {
     inaccuracies: checked.filter(ply => ply.classification === "Inaccuracy").length,
     mistakes: checked.filter(ply => ply.classification === "Mistake").length,
     blunders: checked.filter(ply => ply.classification === "Blunder").length,
-    averageLoss: checked.length ? Math.round(checked.reduce((sum, ply) => sum + (ply.loss ?? 0), 0) / checked.length) : 0,
+    mateThreats: checked.filter(ply => ply.mateThreat).length,
+    averageLoss: numeric.length ? Math.round(numeric.reduce((sum, ply) => sum + (ply.loss ?? 0), 0) / numeric.length) : null,
     turningPoints: sorted.slice(0, 5),
     phases,
   }
