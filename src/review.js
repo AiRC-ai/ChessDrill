@@ -1,6 +1,7 @@
 import { Chess } from 'chess.js';
 import { reviewFromGame, reviewFromPgn, reviewSummary } from './movemirror/game-review.ts';
 import { explainBestMove, solutionLine, solutionPosition } from './movemirror/explain-move.js';
+import { saveTextFile } from './native-export.js';
 
 const CACHE_KEY = 'chess-studio-reviews-v1';
 const DECK_KEY = 'chess-studio-mistakes-v1';
@@ -279,12 +280,7 @@ function annotatedPgn(review) {
 function downloadReview() {
   const review = state.review;
   if (!review?.completedAt) return;
-  const url = URL.createObjectURL(new Blob([annotatedPgn(review)],{type:'application/x-chess-pgn'}));
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = `chess-studio-review-${review.opponent.replace(/[^a-z0-9-]/gi,'_')}.pgn`;
-  anchor.click();
-  setTimeout(()=>URL.revokeObjectURL(url),1000);
+  saveTextFile(`chess-studio-review-${review.opponent.replace(/[^a-z0-9-]/gi,'_')}.pgn`,annotatedPgn(review),'application/x-chess-pgn');
 }
 
 export function handleReviewInput(target) {

@@ -14,6 +14,10 @@ Chess Studio combines [MoveMirror](https://github.com/leglerisaac/movemirror) an
 
 The dashboard brings analysis findings, selected lines, due positions, and opening progress together. No account is required. Browser storage holds reports, up to eight recent sample PGNs, three engine game reviews, and at most 120 personal practice positions on the current device. Clearing this site's browser data removes them. The Progress JSON backup covers repertoire and game puzzles; annotated PGN exports cover an individual game review. Engine evaluations at depth 8–12 are estimates and close classifications can change on a deeper pass.
 
+## Android app
+
+The `android/` project packages Chess Studio and its local Stockfish engine as an installable Android app. The lessons, drills, puzzle deck, and PGN review work offline; public-account analysis needs a connection. The Android build workflow produces an APK. [Android build and transfer instructions](android/README.md) explain how to move a Progress JSON backup from the website into the app. Website and app storage are separate.
+
 ## Local development
 
 Requires Node.js 22 or newer.
