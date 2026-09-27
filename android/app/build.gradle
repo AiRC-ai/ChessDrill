@@ -29,11 +29,31 @@ def buildWebsite = tasks.register('buildWebsite', Exec) {
     commandLine 'npm', 'run', 'build', '--', '--base=/assets/web/'
 }
 
-def copyWebsite = tasks.register('copyWebsite', Copy) {
-    dependsOn buildWebsite
-    from(rootProject.file('../dist')) { into 'web' }
-    into layout.buildDirectory.dir('generated/webAssets')
+abstract class BundleWebsiteAssets extends DefaultTask {
+    @InputDirectory
+    abstract DirectoryProperty getWebsiteDirectory()
+
+    @OutputDirectory
+    abstract DirectoryProperty getAssetsDirectory()
+
+    @TaskAction
+    void bundle() {
+        project.delete(assetsDirectory.get().asFile)
+        project.copy {
+            from websiteDirectory.get().asFile
+            into assetsDirectory.get().dir('web').asFile
+        }
+    }
 }
 
-// Passing the task itself tells Gradle every asset consumer about its dependency.
-android.sourceSets.main.assets.srcDir(copyWebsite)
+def bundleWebsiteAssets = tasks.register('bundleWebsiteAssets', BundleWebsiteAssets) {
+    dependsOn buildWebsite
+    websiteDirectory.set(rootProject.file('../dist'))
+    assetsDirectory.set(layout.buildDirectory.dir('generated/webAssets'))
+}
+
+androidComponents {
+    onVariants(selector().all()) { variant ->
+        variant.sources.assets.addGeneratedSourceDirectory(bundleWebsiteAssets, { it.assetsDirectory })
+    }
+}
