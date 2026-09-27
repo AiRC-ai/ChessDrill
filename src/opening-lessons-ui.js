@@ -33,6 +33,9 @@ export function lessonDetailView(state, appShell, boardHtml, esc) {
   const step = session.step;
   const current = lesson.moves[step - 1];
   const study = session.mode === 'study';
+  const boardCaption = session.mode === 'quiz'
+    ? (session.answered ? `After ${moveLabel(quiz.at, lesson.moves[quiz.at][0])}` : 'Position before your move')
+    : step ? `After ${moveLabel(step - 1, lesson.moves[step - 1][0])}` : 'Starting position';
   const heading = study ? (step ? moveLabel(step - 1, current[0]) : 'The game plan') : session.mode === 'quiz' ? `Recall ${session.quiz + 1} of ${lesson.quizzes.length}` : 'Lesson complete';
   const detail = study ? `<div class="lesson-step">
       <p class="eyebrow">${step ? (step % 2 ? 'WHITE PLAYS' : 'BLACK REPLIES') : 'BEFORE THE FIRST MOVE'}</p><h2>${esc(heading)}</h2><p>${esc(step ? current[1] : lesson.goal)}</p>
@@ -51,8 +54,8 @@ export function lessonDetailView(state, appShell, boardHtml, esc) {
   return appShell(`<main class="page lesson-detail">
     <div class="lesson-top"><button class="back" data-action="lessons">← All lessons</button><span class="eyebrow">${esc(lesson.level.toUpperCase())} · ${lesson.color.toUpperCase()} REPERTOIRE</span></div>
     <div class="lesson-title"><div><p class="eyebrow">OPENING FIELD GUIDE</p><h1>${esc(lesson.name)}</h1><p>${esc(lesson.tagline)}</p></div><span>${session.mode==='study'?`${step}/${lesson.moves.length} moves`:session.mode==='quiz'?`${session.quiz+1}/${lesson.quizzes.length} questions`:'✓ Learned'}</span></div>
-    <div class="lesson-layout"><div class="lesson-board-column">${boardHtml(chess,lesson.color)}<p class="lesson-board-caption">${session.mode==='quiz'&&!session.answered?'Position before your move':step ? `After ${esc(moveLabel(step-1,lesson.moves[step-1][0]))}` : 'Starting position'} · Board viewed from ${lesson.color}'s side</p></div>
-      <div class="lesson-guide">${detail}<div class="lesson-plan"><p class="eyebrow">KEEP THE IDEAS IN MIND</p><dl><dt>Plan</dt><dd>${esc(lesson.plan)}</dd><dt>Pawn break</dt><dd>${esc(lesson.break)}</dd><dt>Watch for</dt><dd>${esc(lesson.watch)}</dd></dl></div></div>
+    <div class="lesson-layout"><div class="lesson-board-column">${boardHtml(chess,lesson.color)}<p class="lesson-board-caption">${esc(boardCaption)} · Board viewed from ${lesson.color}'s side</p></div>
+      <div class="lesson-guide">${detail}${session.mode==='quiz'?'<div class="lesson-plan lesson-memory-note"><p class="eyebrow">RECALL FIRST</p><p>Picture the plan before looking back at the annotated line. If you miss, you’ll get a hint.</p></div>':`<div class="lesson-plan"><p class="eyebrow">KEEP THE IDEAS IN MIND</p><dl><dt>Plan</dt><dd>${esc(lesson.plan)}</dd><dt>Pawn break</dt><dd>${esc(lesson.break)}</dd><dt>Watch for</dt><dd>${esc(lesson.watch)}</dd></dl></div>`}</div>
     </div>
     ${study?`<section class="lesson-sequence"><div class="section-heading"><div><p class="eyebrow">FOLLOW THE LINE</p><h2>Move by move</h2></div><p>Select any move to revisit its reason.</p></div><div class="lesson-moves"><button data-action="lesson-step" data-id="0" class="${step===0?'active':''}">Start</button>${lesson.moves.map(([san],index)=>`<button data-action="lesson-step" data-id="${index+1}" class="${step===index+1?'active':''}">${esc(moveLabel(index,san))}</button>`).join('')}</div><p>This is one instructive continuation, not a forced sequence. Use the plan when your opponent deviates.</p></section>`:''}
   </main>`);
