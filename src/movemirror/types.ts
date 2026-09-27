@@ -153,6 +153,7 @@ export interface EngineCriticalMoment {
   playedMove: string
   bestMove: string
   bestMoveSan: string
+  bestLine?: string[]
   punishmentMove: string
   punishmentMoveSan: string
   evaluationBefore: number

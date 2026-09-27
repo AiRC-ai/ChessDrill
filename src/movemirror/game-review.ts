@@ -15,6 +15,7 @@ export interface ReviewPly {
   bestSan?: string
   bestLine?: string[]
   replySan?: string
+  replyMove?: string
   replyTactic?: "mate" | "capture" | "check"
   evalBefore?: number // White's perspective, in centipawns.
   evalAfter?: number

@@ -4,6 +4,7 @@ import { fetchRecentGames as fetchChessCom, normalizeUsername as normalizeChessC
 import { fetchRecentLichessGames as fetchLichess, normalizeLichessUsername as normalizeLichess, validateLichessUsername as validateLichess } from './movemirror/lichess.ts';
 import { buildDeepReport } from './movemirror/deep-report.ts';
 import { applyEngineAnalysis } from './movemirror/engine-insights.ts';
+import { explainBestMove, solutionLine, solutionPosition } from './movemirror/explain-move.js';
 import { openSampleGame, reviewPgnFormView } from './review.js';
 
 const STORAGE_KEY = 'chess-studio-analysis-v1';
@@ -44,7 +45,7 @@ let controller = null;
 let render = () => {};
 let studyOpening = () => {};
 let navigate = () => {};
-const puzzle = {index: 0, chess: null, selected: null, feedback: '', hint: 0, solved: false, attempts: 0};
+const puzzle = {index: 0, chess: null, selected: null, feedback: '', hint: 0, solved: false, attempts: 0, lineStep: 0};
 
 export function connectAnalysis(callbacks) {
   render = callbacks.render;
@@ -140,7 +141,8 @@ export function handleAnalysisAction(element) {
     }
     case 'next-moment': startMoments(puzzle.index + 1); return true;
     case 'hint-moment': puzzle.hint = Math.min(2, puzzle.hint + 1); render(); return true;
-    case 'reveal-moment': puzzle.feedback = `The engine prefers ${activeMoment()?.bestMoveSan || 'the highlighted move'}.`; puzzle.hint = 2; puzzle.solved = true; render(); return true;
+    case 'reveal-moment': puzzle.feedback = `The engine prefers ${activeMoment()?.bestMoveSan || 'the highlighted move'}.`; puzzle.hint = 2; puzzle.solved = true; puzzle.lineStep = 1; render(); return true;
+    case 'moment-line-step': if (puzzle.solved && activeMoment()) { const moment=activeMoment(); puzzle.lineStep=Math.max(0,Math.min(solutionLine(moment.fen,moment.bestMove,moment.bestLine).length,Number(element.dataset.index)||0));render(); } return true;
     default: return false;
   }
 }
@@ -204,6 +206,7 @@ function startMoments(index = 0) {
   puzzle.hint = 0;
   puzzle.solved = false;
   puzzle.attempts = 0;
+  puzzle.lineStep = 0;
   navigate('puzzle');
 }
 
@@ -223,8 +226,8 @@ export function handlePuzzleSquare(square) {
   puzzle.selected = null;
   puzzle.attempts++;
   if (correct) {
-    chess.move(correct);
     puzzle.solved = true;
+    puzzle.lineStep = 1;
     puzzle.feedback = puzzle.attempts === 1 ? `Found it: ${correct.san}.` : `That's the engine move: ${correct.san}.`;
   } else { puzzle.hint = Math.max(1,puzzle.hint); puzzle.feedback = 'Legal, but it misses the strongest continuation. Try again.'; }
   render();
@@ -233,14 +236,21 @@ export function handlePuzzleSquare(square) {
 export function puzzleView() {
   const moment = activeMoment();
   if (!moment || !puzzle.chess) return '<main class="page"><h1>No positions to review yet.</h1></main>';
-  const chess = puzzle.chess, board = chess.board(), white = moment.color === 'White';
+  const explanation = puzzle.solved ? explainBestMove({
+    fen:moment.fen,bestMove:moment.bestMove,bestLine:moment.bestLine,
+    playedSan:moment.playedMove,punishmentMove:moment.punishmentMove,
+    punishmentSan:moment.punishmentMoveSan,loss:moment.centipawnLoss,
+    reason:moment.reason, mateThreat:moment.category==='Checkmate Patterns',
+  }) : null;
+  const position = explanation ? solutionPosition(moment.fen,explanation.line,puzzle.lineStep) : {fen:moment.fen,lastMove:null};
+  const chess = new Chess(position.fen), board = chess.board(), white = moment.color === 'White';
   const ranks = white ? [0,1,2,3,4,5,6,7] : [7,6,5,4,3,2,1,0];
   const files = white ? [0,1,2,3,4,5,6,7] : [7,6,5,4,3,2,1,0];
   const legal = puzzle.selected ? chess.moves({square:puzzle.selected,verbose:true}).map(move=>move.to) : [];
   const pieceNames = {p:'pawn',n:'knight',b:'bishop',r:'rook',q:'queen',k:'king'};
   const html = ranks.flatMap((rank,ri)=>files.map((file,fi)=>{
     const item = board[rank][file], square = 'abcdefgh'[file] + (8-rank), dark = (rank+file)%2===1;
-    return `<button class="square ${dark?'dark':'light'} ${puzzle.selected===square?'selected':''} ${legal.includes(square)?'legal':''} ${puzzle.hint&&square===moment.bestMove.slice(0,2)?'hint':''} ${puzzle.hint>1&&square===moment.bestMove.slice(2,4)?'hint-target':''}" data-square="${square}" aria-label="${square}${item?` ${item.color==='w'?'White':'Black'} ${pieceNames[item.type]}`:''}">${item?`<img class="piece" draggable="false" src="${import.meta.env.BASE_URL}pieces/cburnett/${item.color}${item.type.toUpperCase()}.svg" alt="">`:''}${fi===0?`<small class="rank">${8-rank}</small>`:''}${ri===7?`<small class="file">${'abcdefgh'[file]}</small>`:''}</button>`;
+    return `<button class="square ${dark?'dark':'light'} ${puzzle.selected===square?'selected':''} ${legal.includes(square)?'legal':''} ${!puzzle.solved&&puzzle.hint&&square===moment.bestMove.slice(0,2)?'hint':''} ${!puzzle.solved&&puzzle.hint>1&&square===moment.bestMove.slice(2,4)?'hint-target':''} ${position.lastMove?.slice(0,2)===square?'last-from':''} ${position.lastMove?.slice(2,4)===square?'last-to':''}" data-square="${square}" aria-label="${square}${item?` ${item.color==='w'?'White':'Black'} ${pieceNames[item.type]}`:''}">${item?`<img class="piece" draggable="false" src="${import.meta.env.BASE_URL}pieces/cburnett/${item.color}${item.type.toUpperCase()}.svg" alt="">`:''}${fi===0?`<small class="rank">${8-rank}</small>`:''}${ri===7?`<small class="file">${'abcdefgh'[file]}</small>`:''}</button>`;
   })).join('');
-  return `<main class="drill-page"><div class="drill-head"><button class="back" data-action="analyze">← Back to report</button><div class="drill-meta"><span>MY GAME POSITIONS · ${puzzle.index+1}/${moments().length}</span><b>${esc(moment.opening)} · ${esc(moment.phase)}</b></div><div class="progress-track"><i style="width:${(puzzle.index+1)/moments().length*100}%"></i></div></div><section class="drill-grid"><div class="board" role="grid" aria-label="Practice position">${html}</div><aside class="coach"><p class="eyebrow">${esc(moment.color.toUpperCase())} TO MOVE · AGAINST ${esc(moment.opponent.toUpperCase())}</p><h2>Find the better move.</h2><p class="challenge-context">In your game you played <b>${esc(moment.playedMove)}</b>. Take a moment to check the position before asking for a hint.</p><div class="feedback ${puzzle.feedback?'show':''}" role="status">${esc(puzzle.feedback || 'Select a piece, then its destination.')}</div>${puzzle.solved?`<p class="challenge-context">${esc(moment.reason)}</p><button class="primary wide" data-action="next-moment">Next position →</button>`:`<button class="secondary wide" data-action="hint-moment">${puzzle.hint===0?'Highlight a piece':puzzle.hint===1?'Show destination':'Hint shown'}</button><button class="text-button" data-action="reveal-moment">Reveal best move</button>`}<a class="moment-game-link" href="${safeUrl(moment.gameUrl)}" target="_blank" rel="noopener noreferrer">Open original game ↗</a></aside></section></main>`;
+  return `<main class="drill-page review-study"><div class="drill-head"><button class="back" data-action="analyze">← Back to report</button><div class="drill-meta"><span>MY GAME POSITIONS · ${puzzle.index+1}/${moments().length}</span><b>${esc(moment.opening)} · ${esc(moment.phase)}</b></div><div class="progress-track"><i style="width:${(puzzle.index+1)/moments().length*100}%"></i></div></div><section class="drill-grid"><div><div class="board" role="grid" aria-label="Practice position">${html}</div>${explanation?`<p class="review-board-caption">${puzzle.lineStep===0?'Starting position':`After ${esc(explanation.line[puzzle.lineStep-1])}`} · illustrative engine line</p>`:''}</div><aside class="coach"><p class="eyebrow">${esc(moment.color.toUpperCase())} TO MOVE · AGAINST ${esc(moment.opponent.toUpperCase())}</p><h2>${puzzle.solved?'Understand the answer.':'Find the better move.'}</h2><p class="challenge-context">In your game you played <b>${esc(moment.playedMove)}</b>. ${puzzle.solved?'Compare it with the engine suggestion.':'Take a moment to check the position before asking for a hint.'}</p><div class="feedback ${puzzle.feedback?'show':''}" role="status">${esc(puzzle.feedback || 'Select a piece, then its destination.')}</div>${explanation?`<div class="review-why"><p class="eyebrow">WHY THE ENGINE PREFERS IT</p><h3>${esc(explanation.headline)}</h3><p>${esc(explanation.why)}</p>${explanation.contrast?`<p class="review-why-contrast">${esc(explanation.contrast)}</p>`:''}<div class="review-line"><small>EXPLORE THE SUGGESTED LINE</small><div><button data-action="moment-line-step" data-index="0" class="${puzzle.lineStep===0?'active':''}">Start</button>${explanation.line.map((san,index)=>`<button data-action="moment-line-step" data-index="${index+1}" class="${puzzle.lineStep===index+1?'active':''}">${esc(san)}</button>`).join('')}</div></div><small class="review-why-note">One illustrative continuation at depth ${analysis.report.engineAnalysis.depth}; other replies are possible.</small></div><button class="primary wide" data-action="next-moment">Next position →</button>`:`<button class="secondary wide" data-action="hint-moment">${puzzle.hint===0?'Highlight a piece':puzzle.hint===1?'Show destination':'Hint shown'}</button><button class="text-button" data-action="reveal-moment">Reveal best move</button>`}<a class="moment-game-link" href="${safeUrl(moment.gameUrl)}" target="_blank" rel="noopener noreferrer">Open original game ↗</a></aside></section></main>`;
 }

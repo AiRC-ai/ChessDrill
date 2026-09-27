@@ -485,6 +485,7 @@ export async function analyzeGamesWithEngine(
         ...position,
         bestMove: before.bestMove,
         bestMoveSan: sanFromUci(position.fen, before.bestMove),
+        bestLine: uciLineToSan(position.fen, before.pv, 6),
         punishmentMove: after.bestMove,
         punishmentMoveSan: sanFromUci(position.afterFen, after.bestMove),
         evaluationBefore: before.scoreCp,
@@ -557,6 +558,7 @@ export async function analyzeFullGame(
         ply.classification = classifyCentipawnLoss(loss)
         ply.mateThreat = result.scoreCp >= 50_000 && previous.scoreCp > -50_000
         if (loss >= 60 && /^[a-h][1-8][a-h][1-8][qrbn]?$/.test(result.bestMove)) {
+          ply.replyMove = result.bestMove
           try {
             const replyBoard = new Chess(ply.afterFen)
             const reply = replyBoard.move({

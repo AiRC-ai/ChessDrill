@@ -1,5 +1,6 @@
 import { Chess } from 'chess.js';
 import { reviewFromGame, reviewFromPgn, reviewSummary } from './movemirror/game-review.ts';
+import { explainBestMove, solutionLine, solutionPosition } from './movemirror/explain-move.js';
 
 const CACHE_KEY = 'chess-studio-reviews-v1';
 const DECK_KEY = 'chess-studio-mistakes-v1';
@@ -53,6 +54,10 @@ export function restoreMistakeDeck(cards) {
       gameId:typeof card.gameId==='string'?card.gameId:'',
       moveNumber:Number.isFinite(card.moveNumber)?card.moveNumber:1,
       loss:Number.isFinite(card.loss)?card.loss:0,mateThreat:!!card.mateThreat,
+      bestLine:solutionLine(card.fen,card.bestMove,card.bestLine),
+      replySan:typeof card.replySan==='string'?card.replySan.slice(0,24):'',
+      replyMove:typeof card.replyMove==='string' && /^[a-h][1-8][a-h][1-8][qrbn]?$/.test(card.replyMove)?card.replyMove:'',
+      depth:Number.isFinite(card.depth)?Math.max(1,Math.min(30,card.depth)):null,
       due:card.due,streak:Math.max(0,Math.min(5,card.streak)),
       attempts:Number.isFinite(card.attempts)?card.attempts:0,
     };
@@ -138,6 +143,10 @@ function cardFromPly(review, ply) {
     moveNumber:ply.number,
     loss:ply.loss,
     mateThreat:!!ply.mateThreat,
+    bestLine:solutionLine(ply.beforeFen,ply.bestMove,ply.bestLine),
+    replySan:ply.replySan || '',
+    replyMove:ply.replyMove || '',
+    depth:review.depth || null,
     due:Date.now(),
     streak:0,
     attempts:0,
@@ -166,7 +175,7 @@ function saveAllMistakes() {
 
 function chooseQuiz(ids) {
   if (!ids.length) return;
-  state.quiz = {ids,cursor:0,selected:null,hint:0,attempts:0,feedback:'',solved:false,done:0};
+  state.quiz = {ids,cursor:0,selected:null,hint:0,attempts:0,feedback:'',solved:false,done:0,lineStep:0};
   navigate('review-practice');
 }
 
@@ -175,6 +184,18 @@ export function startDueMistakes() {
 }
 
 function activeCard() { return deck.find(card=>card.id===state.quiz?.ids[state.quiz.cursor]); }
+
+function studyEvidence(card) {
+  const source = cached.find(review => review.id === card.gameId);
+  const ply = source?.plies.find(item => `${source.id}#${source.color}-${item.ply}` === card.id);
+  return {
+    ...card,
+    bestLine:card.bestLine?.length > 1 ? card.bestLine : ply?.bestLine || card.bestLine || [],
+    replySan:card.replySan || ply?.replySan || '',
+    replyMove:card.replyMove || ply?.replyMove || '',
+    depth:card.depth || source?.depth || null,
+  };
+}
 
 function nextCard() {
   const quiz = state.quiz;
@@ -185,6 +206,7 @@ function nextCard() {
   quiz.attempts = 0;
   quiz.feedback = '';
   quiz.solved = false;
+  quiz.lineStep = 0;
   render();
 }
 
@@ -213,6 +235,7 @@ export function handleReviewSquare(square) {
     const independent = quiz.attempts === 1 && !quiz.hint;
     recordAttempt(card, independent);
     quiz.solved = true;
+    quiz.lineStep = 1;
     quiz.done++;
     quiz.feedback = independent ? `Found it: ${card.bestSan}. You will see it again in ${card.streak===1?'one day':card.streak===2?'three days':'a longer interval'}.` : `That's ${card.bestSan}. It will return soon for another try.`;
   } else {
@@ -304,7 +327,14 @@ export function handleReviewAction(element) {
     case 'export-review-pgn': downloadReview(); return true;
     case 'review-hint': if (state.quiz) {state.quiz.hint=Math.min(2,state.quiz.hint+1);render();} return true;
     case 'review-reveal': {
-      const card=activeCard(); if (card && !state.quiz?.solved) {recordAttempt(card,false);state.quiz.solved=true;state.quiz.done++;state.quiz.hint=2;state.quiz.feedback=`The engine prefers ${card.bestSan}. This card will return in ten minutes.`;render();} return true;
+      const card=activeCard(); if (card && !state.quiz?.solved) {recordAttempt(card,false);state.quiz.solved=true;state.quiz.lineStep=1;state.quiz.done++;state.quiz.hint=2;state.quiz.feedback=`The engine prefers ${card.bestSan}. This card will return in ten minutes.`;render();} return true;
+    }
+    case 'review-line-step': {
+      const card=activeCard(); if (card && state.quiz?.solved) {
+        const evidence=studyEvidence(card);
+        state.quiz.lineStep=Math.max(0,Math.min(solutionLine(card.fen,card.bestMove,evidence.bestLine).length,Number(index)||0));
+        render();
+      } return true;
     }
     case 'review-next-card': nextCard(); return true;
     default: return false;
@@ -336,6 +366,13 @@ export function reviewPracticeView() {
   const quiz = state.quiz, card = activeCard();
   if (!quiz) return '<main class="page"><h1>No practice cards selected.</h1><button data-action="analyze">Analyze games →</button></main>';
   if (!card) return `<main class="page review-finished"><p class="eyebrow">PRACTICE COMPLETE</p><h1>${quiz.done} positions revisited.</h1><p>The next review appears on its due date. Incorrect and revealed moves return sooner.</p><button class="primary" data-action="analyze">Back to analysis →</button></main>`;
+  const evidence = studyEvidence(card);
+  const explanation = quiz.solved ? explainBestMove({
+    fen:card.fen,bestMove:card.bestMove,bestLine:evidence.bestLine,
+    playedSan:card.playedSan,punishmentMove:evidence.replyMove,punishmentSan:evidence.replySan,
+    mateThreat:card.mateThreat,loss:card.loss,
+  }) : null;
+  const position = explanation ? solutionPosition(card.fen,explanation.line,quiz.lineStep) : {fen:card.fen,lastMove:null};
   const hint = quiz.hint ? quiz.hint===1?card.bestMove.slice(0,2):card.bestMove : null;
-  return `<main class="drill-page"><div class="drill-head"><button class="back" data-action="analyze">← Exit practice</button><div class="drill-meta"><span>YOUR GAME PUZZLES · ${quiz.cursor+1}/${quiz.ids.length}</span><b>Move ${card.moveNumber} vs ${esc(card.opponent)}</b></div><div class="progress-track"><i style="width:${(quiz.cursor/quiz.ids.length)*100}%"></i></div></div><section class="drill-grid"><div>${boardHtml(card.fen,card.color,quiz.selected,hint,null)}</div><aside class="coach"><p class="eyebrow">${card.color==='w'?'WHITE':'BLACK'} TO MOVE · ${esc(card.phase.toUpperCase())}</p><h2>Find a better move.</h2><p class="challenge-context">In your game you played <b>${esc(card.playedSan)}</b> and ${card.mateThreat?'allowed a forced mate':`lost about ${(card.loss/100).toFixed(1)} pawns of evaluation`}. Look for checks, captures, and threats.</p><div class="feedback ${quiz.feedback?'show':''}" role="status">${esc(quiz.feedback||'Select a piece and its destination.')}</div>${quiz.solved?`<button class="primary wide" data-action="review-next-card">${quiz.cursor+1===quiz.ids.length?'Finish session':'Next position →'}</button>`:`<button class="secondary wide" data-action="review-hint">${quiz.hint===0?'Highlight a piece':quiz.hint===1?'Show destination':'Hint shown'}</button><button class="text-button" data-action="review-reveal">Reveal best move</button>`}</aside></section></main>`;
+  return `<main class="drill-page review-study"><div class="drill-head"><button class="back" data-action="analyze">← Exit practice</button><div class="drill-meta"><span>YOUR GAME PUZZLES · ${quiz.cursor+1}/${quiz.ids.length}</span><b>Move ${card.moveNumber} vs ${esc(card.opponent)}</b></div><div class="progress-track"><i style="width:${(quiz.cursor/quiz.ids.length)*100}%"></i></div></div><section class="drill-grid"><div>${boardHtml(position.fen,card.color,quiz.solved?null:quiz.selected,quiz.solved?null:hint,position.lastMove)}${explanation?`<p class="review-board-caption">${quiz.lineStep===0?'Starting position':`After ${esc(explanation.line[quiz.lineStep-1])}`} · illustrative engine line</p>`:''}</div><aside class="coach"><p class="eyebrow">${card.color==='w'?'WHITE':'BLACK'} TO MOVE · ${esc(card.phase.toUpperCase())}</p><h2>${quiz.solved?'Understand the answer.':'Find a better move.'}</h2><p class="challenge-context">In your game you played <b>${esc(card.playedSan)}</b> and ${card.mateThreat?'allowed a forced mate':`lost about ${(card.loss/100).toFixed(1)} pawns of evaluation`}. ${quiz.solved?'Compare that decision with the engine line.':'Look for checks, captures, and threats.'}</p><div class="feedback ${quiz.feedback?'show':''}" role="status">${esc(quiz.feedback||'Select a piece and its destination.')}</div>${explanation?`<div class="review-why"><p class="eyebrow">WHY THE ENGINE PREFERS IT</p><h3>${esc(explanation.headline)}</h3><p>${esc(explanation.why)}</p>${explanation.contrast?`<p class="review-why-contrast">${esc(explanation.contrast)}</p>`:''}<div class="review-line"><small>EXPLORE THE SUGGESTED LINE</small><div><button data-action="review-line-step" data-index="0" class="${quiz.lineStep===0?'active':''}">Start</button>${explanation.line.map((san,index)=>`<button data-action="review-line-step" data-index="${index+1}" class="${quiz.lineStep===index+1?'active':''}">${esc(san)}</button>`).join('')}</div></div><small class="review-why-note">One illustrative continuation${evidence.depth?` at depth ${evidence.depth}`:''}; other replies are possible.</small></div><button class="primary wide" data-action="review-next-card">${quiz.cursor+1===quiz.ids.length?'Finish session':'Next position →'}</button>`:`<button class="secondary wide" data-action="review-hint">${quiz.hint===0?'Highlight a piece':quiz.hint===1?'Show destination':'Hint shown'}</button><button class="text-button" data-action="review-reveal">Reveal best move</button>`}</aside></section></main>`;
 }
