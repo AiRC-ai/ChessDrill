@@ -4,13 +4,17 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
+    "predev": "node scripts/prepare-stockfish.mjs",
     "dev": "vite",
+    "prebuild": "node scripts/prepare-stockfish.mjs",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:analysis": "node scripts/smoke-analysis.mjs"
   },
   "dependencies": {
-    "chess.js": "^1.4.0"
+    "chess.js": "^1.4.0",
+    "stockfish": "^19.0.0"
   },
   "devDependencies": {
     "vite": "^7.1.7",
