@@ -82,6 +82,13 @@ export function coverageForLines(lines, index, positionStats, now = Date.now()) 
   return { positions:keys.length, practiced, due, mastery };
 }
 
+export function coverageByOpening(openings, selectedLines, index, positionStats, now = Date.now()) {
+  const selectedById = new Map(selectedLines.map(line => [line.id,line]));
+  return openings.map(o => ({o,lines:o.lines.map(line => selectedById.get(line.id)).filter(Boolean)}))
+    .filter(item => item.lines.length)
+    .map(item => ({...item,c:coverageForLines(item.lines,index,positionStats,now)}));
+}
+
 export function parsePgnCollection(text, existingIds = new Set()) {
   const chunks = text.trim().startsWith('[')
     ? text.trim().split(/\n\s*\n(?=\[Event\s)/g)

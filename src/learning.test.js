@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Chess } from 'chess.js';
-import { buildPositionIndex, coverageForLines, duePositionKeys, linesToPgn, openingInsight, parsePgnCollection, positionKey, positionOptions, updatePositionStat } from './learning.js';
+import { buildPositionIndex, coverageByOpening, coverageForLines, duePositionKeys, linesToPgn, openingInsight, parsePgnCollection, positionKey, positionOptions, updatePositionStat } from './learning.js';
 import { parseMove } from './drill.js';
 
 const lines = [
@@ -20,6 +20,16 @@ it('counts decisions the learner can play rather than opponent replies in covera
   const coverage=coverageForLines([line],index,{});
   expect(coverage.positions).toBe(2);
   expect(coverage.mastery).toBe(0);
+});
+
+it('keeps a Black opening row consistent with overall coverage', () => {
+  const line={id:'black',name:'Test',repertoireColor:'black',moves:['e4','c5','Nf3','d6']};
+  const index=buildPositionIndex([line]);
+  const opening={id:'sicilian',lines:[{id:line.id,name:line.name,moves:line.moves}]};
+  const overall=coverageForLines([line],index,{});
+  const [family]=coverageByOpening([opening],[line],index,{});
+  expect(family.c.positions).toBe(overall.positions);
+  expect(family.c.positions).toBe(2);
 });
 
 describe('position-aware learning', () => {

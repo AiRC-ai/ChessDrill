@@ -1,7 +1,7 @@
 import { Chess } from 'chess.js';
 import { OPENINGS, allLines } from './openings.js';
 import { chooseTheoryMove, createDrill, eligibleSelectedLines, parseMove, weightedPick } from './drill.js';
-import { buildPositionIndex, coverageForLines, dueReviewKeys, linesToPgn, openingInsight, parsePgnCollection, positionKey, positionOptions, updatePositionStat } from './learning.js';
+import { buildPositionIndex, coverageByOpening, coverageForLines, dueReviewKeys, linesToPgn, openingInsight, parsePgnCollection, positionKey, positionOptions, updatePositionStat } from './learning.js';
 import { analysisView, analysisSummary, cancelAnalysisWork, connectAnalysis, handleAnalysisAction, handleAnalysisInput, handlePuzzleSquare, puzzleView, submitAnalysis } from './analysis.js';
 import { dashboardView } from './dashboard.js';
 import { practiceView } from './practice.js';
@@ -271,8 +271,7 @@ function progressView(){
   const coverage=coverageForLines(selected,theoryIndex,state.positionStats);
   const due=dueReviewKeys(state.positionStats,selectedPositionKeys()).length;
   const learned=Object.keys(state.lessonCompleted).length;
-  const families=workingOpenings().map(o=>({o,lines:o.lines.filter(l=>state.selected.has(l.id))}))
-    .filter(x=>x.lines.length).map(x=>({...x,c:coverageForLines(x.lines,theoryIndex,state.positionStats)}))
+  const families=coverageByOpening(workingOpenings(),selected,theoryIndex,state.positionStats)
     .sort((a,b)=>a.c.mastery-b.c.mastery);
   return appShell(`<main class="page progress-page"><p class="eyebrow">YOUR STUDY RECORD</p><h1>Progress</h1>
     <section class="stat-grid"><div><span>${coverage.practiced}/${coverage.positions}</span><small>opening positions seen</small></div><div><span>${due}</span><small>opening positions due</small></div><div><span>${coverage.mastery}%</span><small>estimated mastery</small></div></section>
