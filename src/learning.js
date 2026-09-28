@@ -55,6 +55,10 @@ export function duePositionKeys(stats, keys, now = Date.now()) {
   return [...keys].filter(key => !stats[key] || stats[key].dueAt <= now).sort((a, b) => (stats[a]?.dueAt || 0) - (stats[b]?.dueAt || 0));
 }
 
+export function dueReviewKeys(stats, keys, now = Date.now()) {
+  return duePositionKeys(stats, keys, now).filter(key => (stats[key]?.attempts || 0) > 0);
+}
+
 export function positionMastery(stat) {
   if (!stat?.attempts) return 0;
   const accuracy = stat.correct / stat.attempts;
@@ -67,7 +71,7 @@ export function coverageForLines(lines, index, positionStats, now = Date.now()) 
   const keys = [];
   for (const [key, node] of index) if ([...node.lineIds].some(id => ids.has(id))) keys.push(key);
   const practiced = keys.filter(key => positionStats[key]?.attempts).length;
-  const due = keys.filter(key => !positionStats[key] || positionStats[key].dueAt <= now).length;
+  const due = dueReviewKeys(positionStats, keys, now).length;
   const mastery = keys.length ? Math.round(keys.reduce((sum, key) => sum + positionMastery(positionStats[key]), 0) / keys.length) : 0;
   return { positions:keys.length, practiced, due, mastery };
 }
