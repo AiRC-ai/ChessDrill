@@ -7,12 +7,12 @@ export function lessonCatalogView(state, appShell, esc) {
   const visible = OPENING_LESSONS.filter(lesson => state.lessonFilter === 'all' || lesson.color === state.lessonFilter);
   return appShell(`<main class="page lessons-page">
     <section class="lesson-hero"><div><p class="eyebrow">GUIDED OPENING LESSONS</p><h1>Learn the idea.<br><em>Remember the move.</em></h1><p>Walk through a real opening position, see why each move matters, then answer two recall questions before drilling the line.</p></div><div class="lesson-hero-progress"><strong>${done}/${OPENING_LESSONS.length}</strong><span>lessons learned</span><div class="progress-track"><i style="width:${done / OPENING_LESSONS.length * 100}%"></i></div><small>Progress is saved on this device.</small></div></section>
-    <section class="lesson-principles" aria-label="Opening fundamentals">
+    <details class="opening-secondary lesson-principles-details"><summary>Opening basics: four useful principles</summary><section class="lesson-principles" aria-label="Opening fundamentals">
       <article><span>01</span><h2>Claim the center</h2><p>Control central squares with pawns and pieces. This gives your pieces room to work.</p></article>
       <article><span>02</span><h2>Develop with purpose</h2><p>Bring out knights and bishops while noticing what your opponent threatens.</p></article>
       <article><span>03</span><h2>Protect your king</h2><p>Castle when it is safe, then connect your rooks before opening the position.</p></article>
       <article><span>04</span><h2>Time the pawn break</h2><p>A pawn break challenges a fixed center. Prepare it with pieces instead of pushing by habit.</p></article>
-    </section>
+    </section></details>
     <section class="lesson-catalog"><div class="section-heading"><div><p class="eyebrow">CHOOSE A STARTING POINT</p><h2>Opening paths</h2></div><p>Each lesson follows one illustrative line; opponents can choose other moves.</p></div>
       <div class="lesson-filters" role="group" aria-label="Filter lessons by side">${[['all','All lessons'],['white','Play as White'],['black','Play as Black']].map(([value,label])=>`<button class="${state.lessonFilter===value?'active':''}" data-action="lesson-filter" data-id="${value}" aria-pressed="${state.lessonFilter===value}">${label}</button>`).join('')}</div>
       <div class="lesson-grid">${visible.map(lesson=>`<article class="lesson-card">

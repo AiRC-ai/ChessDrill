@@ -1,0 +1,9 @@
+<?xml version='1.0' encoding='utf-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" width="276" height="276" viewBox="0 0 276 276" role="img" aria-label="Chess Studio">
+  <rect width="276" height="276" rx="59" fill="#173d2f" />
+  <rect x="58" y="58" width="160" height="160" rx="12" fill="#f5f4ee" />
+  <rect x="138" y="58" width="80" height="80" rx="3" fill="#7ca38b" />
+  <rect x="58" y="138" width="80" height="80" rx="3" fill="#7ca38b" />
+  <circle cx="96" cy="178" r="13" fill="#b9e36b" />
+  <path d="M99 177 L180 96 M159 97 H181 V119" fill="none" stroke="#b9e36b" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" />
+</svg>

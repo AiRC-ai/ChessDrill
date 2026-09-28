@@ -1,13 +1,31 @@
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 
-export function dashboardView({summary, selected, due, dueMistakes, mastery, practiced, positions}) {
-  const hasLines = selected > 0;
+export function dashboardView({summary, selected, due, dueMistakes}) {
+  const next = dueMistakes ? {
+    title: 'Practice a move from your games',
+    detail: `${dueMistakes} saved ${dueMistakes === 1 ? 'position is' : 'positions are'} ready for review.`,
+    action: 'practice-due-mistakes', label: 'Practice game positions',
+  } : due ? {
+    title: 'Review your opening positions',
+    detail: `${due} ${due === 1 ? 'position is' : 'positions are'} due today.`,
+    action: 'review', label: 'Review due positions',
+  } : selected ? {
+    title: 'Keep your repertoire fresh',
+    detail: `${selected} selected ${selected === 1 ? 'line is' : 'lines are'} ready for a short drill.`,
+    action: 'start', label: 'Start an opening drill',
+  } : {
+    title: 'Start with one opening',
+    detail: 'Learn the plan, then practice the key moves.',
+    action: 'lessons', label: 'Explore opening lessons',
+  };
   return `<main class="studio-home">
-    <section class="studio-hero"><div class="studio-hero-copy"><p class="eyebrow">YOUR CHESS LEARNING SPACE</p><h1>See the pattern.<br><em>Own the next move.</em></h1><p>Learn from the games you actually play. MoveMirror finds recurring gaps, ChessDrill makes the right responses automatic, and your progress tells you what to revisit.</p><div class="studio-hero-actions"><button class="primary" data-action="analyze">Analyze my games <span>↗</span></button><button class="secondary" data-action="lessons">Learn openings →</button></div><div class="studio-hero-foot">♙ &nbsp; CHESS.COM + LICHESS &nbsp; · &nbsp; PRIVATE, BROWSER-BASED PRACTICE</div></div><div class="studio-board-art" aria-hidden="true"><div class="art-top"><span>KNOW YOUR NEXT MOVE</span><span>01 / 03</span></div><div class="art-board">${Array.from({length:64},(_,i)=>`<span class="${(Math.floor(i/8)+i%8)%2?'dark':'light'} ${[18,26,34,42].includes(i)?'path':''}">${i===42?'♞':i===12?'♙':i===23?'♟':i===59?'♔':''}</span>`).join('')}</div><div class="art-bottom"><b>Understand → Practice → Improve</b><span>♜ &nbsp; ♝ &nbsp; ♞</span></div></div></section>
-    <div class="studio-highlights"><div><span class="highlight-symbol">◇</span><div><strong>${summary ? `${esc(summary.score)}%` : '—'}</strong><small>${summary ? `Result score · @${esc(summary.username)}` : 'Your last analysis'}</small></div></div><div><span class="highlight-symbol">♞</span><div><strong>${selected.toLocaleString()}</strong><small>Opening lines selected</small></div></div><div><span class="highlight-symbol">◷</span><div><strong>${due}</strong><small>Positions due for review</small></div></div><div><span class="highlight-symbol">↗</span><div><strong>${mastery}%</strong><small>Repertoire mastery · ${practiced}/${positions} seen</small></div></div></div>
-    ${dueMistakes ? `<section class="studio-review-due"><div><p class="eyebrow">TODAY’S PERSONAL PUZZLES</p><h2>${dueMistakes} ${dueMistakes===1?'position':'positions'} from your own games are ready.</h2><p>Recall the move you missed before seeing the engine answer.</p></div><button class="primary" data-action="practice-due-mistakes">Practice due moves →</button></section>` : ''}
-    <section class="studio-section"><div class="studio-section-heading"><div><p class="eyebrow">THE LEARNING LOOP</p><h2>A clear next step, every time.</h2></div><p>Start with your games, learn the plans, practice the moves, then check what stuck.</p></div><div class="studio-path"><article><span class="path-number">01</span><div class="path-icon">◈</div><p class="eyebrow">MOVE MIRROR</p><h3>Understand your games</h3><p>Replay public games from Chess.com or Lichess. See strengths, recurring weaknesses, puzzle themes, and a four-week plan.</p><button data-action="analyze">Analyze games <span>↗</span></button></article><article><span class="path-number">02</span><div class="path-icon">♞</div><p class="eyebrow">CHESS DRILL</p><h3>Learn, then build your repertoire</h3><p>Study the idea behind a common opening, check your recall on the board, and practice its full line with spaced repetition.</p><button data-action="lessons">Start guided lessons <span>↗</span></button><button class="path-secondary" data-action="home">Browse opening lines <span>↗</span></button></article><article><span class="path-number">03</span><div class="path-icon">♛</div><p class="eyebrow">THEORY CHALLENGE</p><h3>Handle the unexpected</h3><p>Play a random color against varied theory. Find documented responses from the position, even after a transposition.</p><button data-action="challenge">Start a challenge <span>↗</span></button></article></div></section>
-    <section class="studio-today"><div><p class="eyebrow">YOUR NEXT SESSION</p><h2>${summary ? `Work on ${esc(summary.theme)}.` : hasLines ? 'Keep your openings fresh.' : 'Start with one useful insight.'}</h2><p>${summary ? `${esc(summary.weakness)} appeared in @${esc(summary.username)}'s recent games. Practice the recommended theme, then revisit your opening positions.` : hasLines ? `${due ? `${due} positions are due today.` : 'Your selected lines are ready for another smart drill.'} A short session keeps your repertoire available in real games.` : 'Analyze a public account to find a tactical focus, or pick an opening family to begin training immediately.'}</p><div class="studio-today-actions">${summary ? `<button class="primary" data-action="analyze">View training plan →</button>` : `<button class="primary" data-action="${hasLines?'start':'analyze'}">${hasLines?'Start smart drill':'Analyze my games'} →</button>`}${due ? '<button class="secondary" data-action="review">Review due positions</button>' : `<button class="secondary" data-action="${hasLines?'progress':'lessons'}">${hasLines?'See progress':'Learn an opening'}</button>`}</div></div><div class="today-notation" aria-hidden="true"><span>1. notice</span><span>2. practice</span><span>3. remember</span><strong>♘</strong></div></section>
-    <footer class="studio-footer"><b>Chess Studio</b><span>MoveMirror + ChessDrill · Built for deliberate practice.</span><span>Game data from public Chess.com and Lichess APIs. Progress stays on this device.</span></footer>
+    <section class="home-intro"><p class="eyebrow">CHESS STUDIO</p><h1>Your next move.</h1><p>Review your games, learn an opening, or practice what you missed.</p></section>
+    <section class="home-next" aria-label="Suggested next step"><div><p class="eyebrow">PICK UP WHERE YOU LEFT OFF</p><h2>${next.title}</h2><p>${next.detail}</p></div><button class="primary" data-action="${next.action}">${next.label} →</button></section>
+    <section class="home-actions" aria-label="Choose a study area">
+      <button class="home-card" data-action="analyze"><span class="home-card-icon" aria-hidden="true">♟</span><span><b>Review games</b><small>Analyze an account or import a PGN.</small></span><span class="home-card-arrow" aria-hidden="true">→</span></button>
+      <button class="home-card" data-action="home"><span class="home-card-icon" aria-hidden="true">▦</span><span><b>Learn openings</b><small>Study plans and choose repertoire lines.</small></span><span class="home-card-arrow" aria-hidden="true">→</span></button>
+      <button class="home-card" data-action="practice"><span class="home-card-icon" aria-hidden="true">↗</span><span><b>Practice</b><small>Drill openings, mistakes, and theory.</small></span><span class="home-card-arrow" aria-hidden="true">→</span></button>
+    </section>
+    ${summary ? `<p class="home-recent">Last game analysis: <button data-action="analyze">@${esc(summary.username)} · ${esc(summary.games)} games →</button></p>` : ''}
   </main>`;
 }
