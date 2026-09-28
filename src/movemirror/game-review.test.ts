@@ -41,6 +41,12 @@ it("replays PGNs from either perspective and preserves each position", () => {
   expect(uciLineToSan(white.plies[0].beforeFen,["e2e4","e7e5"])).toEqual(["e4","e5"])
 })
 
+it("respects the chosen PGN side even when both player headers match", () => {
+  const duplicated = pgn.replace('[Black "Opponent"]','[Black "Me"]')
+  expect(reviewFromPgn(duplicated,'w').color).toBe('w')
+  expect(reviewFromPgn(duplicated,'b').color).toBe('b')
+})
+
 it("scores adjacent positions from the moving side and handles terminal mate", async () => {
   const scores = [50,100,-80,400]
   const moves = ["e2e4","e7e5","g2g3","d8h4"]

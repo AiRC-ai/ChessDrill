@@ -38,18 +38,24 @@ function wait(milliseconds: number, signal?: AbortSignal) {
       return
     }
 
-    const timeout = globalThis.setTimeout(resolve, milliseconds)
-    signal?.addEventListener(
-      "abort",
-      () => {
-        globalThis.clearTimeout(timeout)
-        reject(abortError())
-      },
-      { once: true },
-    )
+    const timeout = globalThis.setTimeout(() => { signal?.removeEventListener("abort", onAbort); resolve() }, milliseconds)
+    const onAbort = () => { globalThis.clearTimeout(timeout); reject(abortError()) }
+    signal?.addEventListener("abort", onAbort, { once: true })
   })
 }
 
+export function validChessComApiUrl(value: string, username?: string) {
+  try {
+    const url = new URL(value)
+    const match = url.pathname.match(/^\/pub\/player\/([a-z0-9_-]{2,30})(?:\/games\/(?:archives|\d{4}\/(?:0[1-9]|1[0-2])))?$/)
+    return url.protocol === "https:" && url.hostname === "api.chess.com" &&
+      !url.port && !url.username && !url.password && !url.search && !url.hash &&
+      !!match && (!username || match[1] === username.toLowerCase())
+  } catch { return false }
+}
+
+// Chess.com's JSONP fallback runs in an opaque-origin sandbox. Its scripts must
+// never execute in the app document, which contains the user's study data.
 function jsonp<T>(url: string, signal?: AbortSignal): Promise<T> {
   return new Promise((resolve, reject) => {
     if (typeof window === "undefined" || typeof document === "undefined") {
@@ -62,16 +68,24 @@ function jsonp<T>(url: string, signal?: AbortSignal): Promise<T> {
       return
     }
 
-    const callbackName = `moveMirror_${Date.now()}_${Math.random()
-      .toString(36)
-      .slice(2)}`
-    const script = document.createElement("script")
-    const separator = url.includes("?") ? "&" : "?"
+    if (!validChessComApiUrl(url)) {
+      reject(new ChessComApiError("Chess.com returned an invalid archive address."))
+      return
+    }
+    const token = Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, "0")).join("")
+    const frame = document.createElement("iframe")
+    frame.sandbox.add("allow-scripts")
+    frame.referrerPolicy = "no-referrer"
+    frame.hidden = true
+    frame.title = "Chess.com data bridge"
     let settled = false
-
+    const timeout = globalThis.setTimeout(() => finish(() => reject(new ChessComApiError("Chess.com took too long to respond."))), 20000)
     const cleanUp = () => {
-      script.remove()
-      delete (window as unknown as Record<string, unknown>)[callbackName]
+      globalThis.clearTimeout(timeout)
+      frame.onload = null
+      frame.onerror = null
+      frame.remove()
+      window.removeEventListener("message", onMessage)
       signal?.removeEventListener("abort", onAbort)
     }
 
@@ -83,35 +97,30 @@ function jsonp<T>(url: string, signal?: AbortSignal): Promise<T> {
     }
 
     const onAbort = () => finish(() => reject(abortError()))
-
-    ;(window as unknown as Record<string, unknown>)[callbackName] = (
-      payload: T & { message?: string },
-    ) => {
-      const message = payload?.message
-      if (message && !("games" in (payload as object))) {
-        finish(() => reject(new ChessComApiError(message)))
+    const onMessage = (event: MessageEvent) => {
+      if (event.source !== frame.contentWindow || event.origin !== "null" || event.data?.token !== token) return
+      if (!event.data.ok) {
+        finish(() => reject(new ChessComApiError("Chess.com did not return data. Try again shortly.")))
+        return
+      }
+      const payload = event.data.payload as T & { message?: string }
+      if (payload?.message && !("games" in (payload as object))) {
+        finish(() => reject(new ChessComApiError(payload.message)))
         return
       }
       finish(() => resolve(payload))
     }
-
-    script.async = true
-    script.src = `${url}${separator}callback=${callbackName}`
-    script.onerror = () =>
-      finish(() =>
-        reject(
-          new ChessComApiError(
-            "Chess.com did not return data. Check the username and try again.",
-          ),
-        ),
-      )
-
+    frame.onload = () => frame.contentWindow?.postMessage({ token, url }, "*")
+    frame.onerror = () => finish(() => reject(new ChessComApiError("Unable to load the Chess.com data bridge.")))
     signal?.addEventListener("abort", onAbort, { once: true })
-    document.head.appendChild(script)
+    window.addEventListener("message", onMessage)
+    frame.src = `${import.meta.env.BASE_URL}chesscom-bridge.html`
+    document.body.appendChild(frame)
   })
 }
 
 async function requestJson<T>(url: string, signal?: AbortSignal): Promise<T> {
+  if (!validChessComApiUrl(url)) throw new ChessComApiError("Chess.com returned an invalid archive address.")
   let fetchFailure: unknown
   const headers: Record<string, string> = { Accept: "application/json" }
   if (typeof window === "undefined") {
@@ -119,10 +128,14 @@ async function requestJson<T>(url: string, signal?: AbortSignal): Promise<T> {
   }
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
+    const timeoutController = new AbortController()
+    const timeout = globalThis.setTimeout(() => timeoutController.abort(), 12000)
+    const onAbort = () => timeoutController.abort()
+    signal?.addEventListener("abort", onAbort, { once: true })
     try {
       const response = await fetch(url, {
         headers,
-        signal,
+        signal: timeoutController.signal,
       })
 
       if (response.status === 429 && attempt < 2) {
@@ -154,6 +167,9 @@ async function requestJson<T>(url: string, signal?: AbortSignal): Promise<T> {
       if (error instanceof ChessComApiError || signal?.aborted) throw error
       fetchFailure = error
       break
+    } finally {
+      globalThis.clearTimeout(timeout)
+      signal?.removeEventListener("abort", onAbort)
     }
   }
 
@@ -173,7 +189,8 @@ async function requestJson<T>(url: string, signal?: AbortSignal): Promise<T> {
 export function normalizeUsername(input: string) {
   const trimmed = input.trim()
   const fromUrl = trimmed.match(/chess\.com\/(?:member|player)\/([^/?#]+)/i)?.[1]
-  return decodeURIComponent(fromUrl ?? trimmed).replace(/^@/, "").trim()
+  try { return decodeURIComponent(fromUrl ?? trimmed).replace(/^@/, "").trim() }
+  catch { return trimmed }
 }
 
 export function validateUsername(username: string) {
@@ -204,6 +221,9 @@ export async function fetchRecentGames({
     `${API_ROOT}/player/${encodedUsername}`,
     signal,
   )
+  if (!profileResponse || typeof profileResponse.username !== "string") {
+    throw new ChessComApiError("Chess.com returned an incomplete profile. Try again later.")
+  }
   const profile: PlayerProfile = { ...profileResponse, platform: "chesscom" }
 
   onProgress?.({
@@ -215,8 +235,11 @@ export async function fetchRecentGames({
     `${API_ROOT}/player/${encodedUsername}/games/archives`,
     signal,
   )
+  if (!archiveIndex || !Array.isArray(archiveIndex.archives)) {
+    throw new ChessComApiError("Chess.com returned an incomplete game archive. Try again later.")
+  }
 
-  const archiveUrls = [...(archiveIndex.archives ?? [])]
+  const archiveUrls = [...(Array.isArray(archiveIndex.archives) ? archiveIndex.archives : [])]
     .reverse()
     .slice(0, MAX_ARCHIVES_TO_SCAN)
   const matchingGames: ChessGame[] = []
@@ -224,6 +247,10 @@ export async function fetchRecentGames({
 
   for (const archiveUrl of archiveUrls) {
     if (signal?.aborted) throw abortError()
+    if (typeof archiveUrl !== "string" || !validChessComApiUrl(archiveUrl, username) ||
+        !/^\/pub\/player\/[a-z0-9_-]+\/games\/\d{4}\/(?:0[1-9]|1[0-2])$/.test(new URL(archiveUrl).pathname)) {
+      throw new ChessComApiError("Chess.com returned an invalid archive address.")
+    }
 
     onProgress?.({
       stage: "games",
@@ -234,8 +261,9 @@ export async function fetchRecentGames({
     const archive = await requestJson<GameArchive>(archiveUrl, signal)
     monthsScanned += 1
 
-    const games = (archive.games ?? []).filter(
+    const games = (Array.isArray(archive.games) ? archive.games : []).filter(
       (game) =>
+        !!game &&
         game.rules === "chess" &&
         Boolean(game.pgn) &&
         Boolean(game.white?.username) &&

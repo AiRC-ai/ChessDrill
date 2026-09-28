@@ -10,10 +10,10 @@ describe('engine study explanation', () => {
     const result = explainBestMove({
       fen:board.fen(),bestMove:'e2e3',playedSan:'g4',punishmentSan:'Qh4#',mateThreat:true,
     });
-    expect(result.headline).toContain('mating reply');
+    expect(result.headline).toContain('mating threat');
     expect(result.contrast).toContain('Qh4# was checkmate');
-    expect(result.contrast).toContain('Qh4+ can be met by g3');
-    expect(result.why).toContain('g3 available');
+    expect(result.contrast).toContain('legal answer to the check is g3');
+    expect(result.why).toContain('leaves the pawn on g2');
     expect(result.line).toEqual(['e3']);
   });
 
@@ -23,7 +23,7 @@ describe('engine study explanation', () => {
     board.move('e5');
     const result = explainBestMove({fen:board.fen(),bestMove:'e2e3',playedSan:'g4',mateThreat:true});
     expect(result.contrast).toContain('Qh4# was checkmate');
-    expect(result.contrast).toContain('g3');
+    expect(result.contrast).toContain('legal answer to the check is g3');
   });
 
   it('ties a capture and the opponent reply to a legal continuation', () => {
@@ -46,7 +46,22 @@ describe('engine study explanation', () => {
     const start = new Chess().fen();
     expect(solutionLine(start,'e2e4',['d4','e5'])).toEqual(['e4']);
     const result = explainBestMove({fen:start,bestMove:'e2e4',playedSan:'a3',loss:90});
-    expect(result.why).toContain('central square e4');
+    expect(result.why).toContain('e4, a central square');
     expect(result.contrast).toContain('reviewed depth');
+  });
+
+  it('identifies a double attack from actual attacked squares', () => {
+    const result = explainBestMove({fen:'q3r1k1/8/8/1N6/8/8/7K/8 w - - 0 1',bestMove:'b5c7'});
+    expect(result.principle).toBe('Double attack');
+    expect(result.why).toContain('queen on a8');
+    expect(result.why).toContain('rook on e8');
+    expect(result.question).toContain('two valuable targets');
+  });
+
+  it('does not invent a defense when the alleged best move still allows mate', () => {
+    const board = new Chess(); board.move('f3'); board.move('e5');
+    const result = explainBestMove({fen:board.fen(),bestMove:'g2g4',playedSan:'g4',punishmentSan:'Qh4#',mateThreat:true});
+    expect(result.contrast).toContain('also checkmates');
+    expect(result.contrast).not.toContain('legal answer');
   });
 });

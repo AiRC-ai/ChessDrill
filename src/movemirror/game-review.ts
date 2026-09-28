@@ -59,9 +59,12 @@ export function reviewFromGame(game: ChessGame, username: string): GameReview {
   const black = game.black.username || headers.Black || "Black"
   const color = black.toLowerCase() === username.toLowerCase() ? "b" : "w"
   const opponent = color === "w" ? black : white
-  const opening = headers.Opening || (game.eco?.startsWith("https://")
-    ? decodeURIComponent(game.eco.split("/").pop() || "").replace(/-/g, " ")
-    : game.eco) || "Your game"
+  let ecoName = game.eco
+  if (ecoName?.startsWith("https://")) {
+    try { ecoName = decodeURIComponent(ecoName.split("/").pop() || "").replace(/-/g, " ") }
+    catch { ecoName = "Your game" }
+  }
+  const opening = headers.Opening || ecoName || "Your game"
   return {
     id: game.url || `pgn:${pgnId(game.pgn)}`,
     pgn: game.pgn,
@@ -110,7 +113,12 @@ export function reviewFromPgn(pgn: string, color: "w" | "b"): GameReview {
     black: { username: color === "b" ? username : opponent, rating: 0, result: "unknown" },
     eco: headers.Opening,
   }
-  return reviewFromGame(game, username)
+  const review = reviewFromGame(game, username)
+  // A PGN can use identical or missing player names. The selected side is authoritative.
+  review.color = color
+  review.username = username
+  review.opponent = opponent
+  return review
 }
 
 export function uciLineToSan(fen: string, line: string[], limit = 6) {

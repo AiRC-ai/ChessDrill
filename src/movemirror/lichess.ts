@@ -221,7 +221,8 @@ function perfType(filter: GameFilter) {
 export function normalizeLichessUsername(input: string) {
   const trimmed = input.trim()
   const fromUrl = trimmed.match(/lichess\.org\/@\/([^/?#]+)/i)?.[1]
-  return decodeURIComponent(fromUrl ?? trimmed).replace(/^@/, "").trim()
+  try { return decodeURIComponent(fromUrl ?? trimmed).replace(/^@/, "").trim() }
+  catch { return trimmed }
 }
 
 export function validateLichessUsername(username: string) {

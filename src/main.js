@@ -2,13 +2,14 @@ import { Chess } from 'chess.js';
 import { OPENINGS, allLines } from './openings.js';
 import { chooseTheoryMove, createDrill, eligibleSelectedLines, parseMove, weightedPick } from './drill.js';
 import { buildPositionIndex, coverageForLines, dueReviewKeys, linesToPgn, openingInsight, parsePgnCollection, positionKey, positionOptions, updatePositionStat } from './learning.js';
-import { analysisView, analysisSummary, connectAnalysis, handleAnalysisAction, handleAnalysisInput, handlePuzzleSquare, puzzleView, submitAnalysis } from './analysis.js';
+import { analysisView, analysisSummary, cancelAnalysisWork, connectAnalysis, handleAnalysisAction, handleAnalysisInput, handlePuzzleSquare, puzzleView, submitAnalysis } from './analysis.js';
 import { dashboardView } from './dashboard.js';
 import { practiceView } from './practice.js';
 import { OPENING_LESSONS } from './opening-lessons.js';
 import { lessonCatalogView, lessonDetailView, handleLessonAction } from './opening-lessons-ui.js';
 import { cancelReviewEngine, connectReview, dueMistakeCount, exportMistakeDeck, gameReviewView, handleReviewAction, handleReviewInput, handleReviewSquare, mistakeDeckSummary, reviewPracticeView, restoreMistakeDeck, submitReviewPgn } from './review.js';
 import { saveTextFile } from './native-export.js';
+import { validateBackup } from './backup.js';
 import './styles.css';
 
 const PIECE_NAMES={p:'pawn',n:'knight',b:'bishop',r:'rook',q:'queen',k:'king'},MOVE_MS=240,REPLY_PAUSE_MS=380,PIECE_BASE=`${import.meta.env.BASE_URL}pieces/cburnett`;
@@ -16,13 +17,14 @@ const BEGINNER=new Set(['Italian Game','Scotch Game','Four Knights Game','Ruy Lo
 const INTERMEDIATE=new Set([...BEGINNER,'Alekhine Defense','Benoni Defense','Benko Gambit',"Bishop's Opening",'Catalan Opening','English Defense','Grünfeld Defense','Modern Defense','Nimzo-Indian Defense','Nimzo-Larsen Attack',"Queen's Indian Defense",'Réti Opening','Semi-Slav Defense','Three Knights Opening','Trompowsky Attack','Bird Opening','Danish Gambit',"King's Gambit","Petrov's Defense",'Philidor Defense']);
 const RECOMMENDATIONS=[['Italian Game','Natural development and clear attacking plans.'],["Queen's Gambit",'A principled introduction to positional chess.'],['London System','A dependable setup that is easy to revisit.'],['Caro-Kann Defense','A sound, structured answer to 1.e4.'],['French Defense','Teaches pawn chains and counterplay.'],['Sicilian Defense','Dynamic winning chances against 1.e4.'],['Ruy Lopez','Classic strategic themes at every level.'],["King's Indian Defense",'Active kingside play against 1.d4.']];
 const STORAGE_KEY='chessdrill-v2';
-function loadSaved(){try{return JSON.parse(localStorage.getItem(STORAGE_KEY)||'null')||{...JSON.parse(localStorage.getItem('chessdrill-v1')||'{}'),version:2};}catch{return {};}}
+function loadSaved(){try{const raw=JSON.parse(localStorage.getItem(STORAGE_KEY)||'null')||{...JSON.parse(localStorage.getItem('chessdrill-v1')||'{}'),version:2};return validateBackup(raw,new Set(allLines().map(l=>l.id)),OPENINGS.map(o=>o.id),OPENING_LESSONS.map(l=>l.id));}catch{return {};}}
 const saved=loadSaved(),state={screen:'dashboard',selected:new Set(saved.selected||[]),expanded:new Set(saved.expanded||['italian']),stats:saved.stats||{},positionStats:saved.positionStats||{},lessonCompleted:saved.lessonCompleted||{},lessonFilter:'all',lesson:null,side:saved.side||'repertoire',focus:saved.focus||'all',sort:saved.sort||'eco',query:'',level:saved.level||'beginner',showShortLines:saved.showShortLines||false,challengeDifficulty:saved.challengeDifficulty||'common',timerSeconds:saved.timerSeconds||0,lineRoles:saved.lineRoles||{},customLines:saved.customLines||[],orientation:'white',session:null,challenge:null,selectedSquare:null,message:'',hintLevel:0,pendingOutOfBook:null};
 let theoryIndex;
 const workingLines=()=>[...allLines(),...state.customLines];
 const workingOpenings=()=>state.customLines.length?[...OPENINGS,{id:'custom-repertoire',name:'Custom repertoire',eco:'PGN',color:'white',description:'Your imported lines',lines:state.customLines}]:OPENINGS;
 function rebuildIndex(){theoryIndex=buildPositionIndex(workingLines());const valid=new Set(workingLines().map(l=>l.id));state.selected=new Set([...state.selected].filter(id=>valid.has(id)));}rebuildIndex();
-function save(){localStorage.setItem(STORAGE_KEY,JSON.stringify({version:2,selected:[...state.selected],expanded:[...state.expanded],stats:state.stats,positionStats:state.positionStats,lessonCompleted:state.lessonCompleted,side:state.side,focus:state.focus,sort:state.sort,level:state.level,showShortLines:state.showShortLines,challengeDifficulty:state.challengeDifficulty,timerSeconds:state.timerSeconds,lineRoles:state.lineRoles,customLines:state.customLines}));}
+function backupData(){return {version:2,selected:[...state.selected],expanded:[...state.expanded],stats:state.stats,positionStats:state.positionStats,lessonCompleted:state.lessonCompleted,side:state.side,focus:state.focus,sort:state.sort,level:state.level,showShortLines:state.showShortLines,challengeDifficulty:state.challengeDifficulty,timerSeconds:state.timerSeconds,lineRoles:state.lineRoles,customLines:state.customLines};}
+function save(){try{localStorage.setItem(STORAGE_KEY,JSON.stringify(backupData()));state.storageNotice='';}catch{state.storageNotice='Device storage is full. Back up your progress to a file before leaving this page.';}}
 const esc=v=>String(v).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 const pct=s=>s?.attempts?Math.round(s.correct/s.attempts*100):null;
 const lineRole=l=>state.lineRoles[l.id]||'both';
@@ -43,11 +45,11 @@ function appShell(content){
     ['library','lessons','lesson'].includes(state.screen)?'home':
     ['practice','drill','review-practice','challenge-setup','challenge-play'].includes(state.screen)?'practice':'progress';
   const links=[['dashboard','Home','⌂'],['analyze','Games','♟'],['home','Openings','▦'],['practice','Practice','↗'],['progress','Progress','◷']];
-  return `<header class="topbar"><button class="brand" data-action="dashboard" aria-label="Chess Studio home"><span class="brand-mark"><img src="${import.meta.env.BASE_URL}chess-studio-icon.svg" alt=""></span><span>Chess<span>Studio</span></span></button><nav aria-label="Main navigation">${links.map(([action,label,icon])=>`<button class="nav-link ${active===action?'active':''}" data-action="${action}" ${active===action?'aria-current="page"':''}><span class="nav-icon" aria-hidden="true">${icon}</span><span>${label}</span></button>`).join('')}</nav></header>${content}`;
+  return `<header class="topbar"><button class="brand" data-action="dashboard" aria-label="Chess Studio home"><span class="brand-mark"><img src="${import.meta.env.BASE_URL}chess-studio-icon.svg" alt=""></span><span>Chess<span>Studio</span></span></button><nav aria-label="Main navigation">${links.map(([action,label,icon])=>`<button class="nav-link ${active===action?'active':''}" data-action="${action}" ${active===action?'aria-current="page"':''}><span class="nav-icon" aria-hidden="true">${icon}</span><span>${label}</span></button>`).join('')}</nav></header>${state.storageNotice?`<p class="storage-warning" role="alert">${esc(state.storageNotice)}</p>`:''}${content}`;
 }
 
 function recommendationsView(){return `<section class="recommended"><div class="section-heading"><div><p class="eyebrow">RECOMMENDED OPENINGS</p><h2>A strong place to start</h2></div><p>Balanced, practical repertoires</p></div><div class="recommendation-grid">${RECOMMENDATIONS.map(([name,reason])=>{const o=workingOpenings().find(x=>x.name===name),v=o&&(openingForLevel(o)||o);if(!v)return'';const added=v.lines.every(l=>state.selected.has(l.id));return `<article><span class="color-dot ${o.color}">${o.color==='white'?'W':'B'}</span><div><b>${esc(name)}</b><p>${esc(reason)}</p><small>${v.lines.length} foundational lines</small></div><button class="${added?'added':''}" data-action="recommend" data-id="${o.id}">${added?'✓ Added':'+ Add'}</button></article>`;}).join('')}</div></section>`;}
-function openingCard(o){const expanded=state.expanded.has(o.id),count=o.lines.filter(l=>state.selected.has(l.id)).length,all=count===o.lines.length,some=count>0&&!all;return `<article class="opening-card ${expanded?'expanded':''}"><div class="opening-summary"><button class="opening-toggle ${all?'checked':''} ${some?'partial':''}" data-action="toggle-opening" data-id="${o.id}"><span>✓</span></button><button class="opening-details" data-action="expand" data-id="${o.id}"><span class="color-dot ${o.color}">${o.color==='white'?'W':'B'}</span><span class="opening-title"><b>${esc(o.name)}</b><small>${o.eco} · ${esc(o.description)}</small></span><span class="line-count">${count}/${o.lines.length} lines</span><span class="chevron">⌄</span></button></div>${expanded?`<div class="line-list"><div class="line-list-head"><span>VARIATION</span><span>ROLE</span><button data-action="toggle-opening" data-id="${o.id}">${all?'Deselect all':'Select all'}</button></div>${o.lines.map(l=>`<div class="line-row"><label><input type="checkbox" data-line="${l.id}" ${state.selected.has(l.id)?'checked':''}><span class="fake-check">✓</span></label><span><b>${esc(l.name)}</b><small>${l.moves.join(' ')}</small></span><select data-role="${l.id}"><option value="both" ${lineRole(l)==='both'?'selected':''}>Both</option><option value="white" ${lineRole(l)==='white'?'selected':''}>White</option><option value="black" ${lineRole(l)==='black'?'selected':''}>Black</option></select><span class="accuracy">${pct(state.stats[l.id])===null?'New':pct(state.stats[l.id])+'%'}</span></div>`).join('')}</div>`:''}</article>`;}
+function openingCard(o){const expanded=state.expanded.has(o.id),count=o.lines.filter(l=>state.selected.has(l.id)).length,all=count===o.lines.length,some=count>0&&!all;return `<article class="opening-card ${expanded?'expanded':''}"><div class="opening-summary"><button class="opening-toggle ${all?'checked':''} ${some?'partial':''}" data-action="toggle-opening" data-id="${o.id}"><span>✓</span></button><button class="opening-details" data-action="expand" data-id="${o.id}"><span class="color-dot ${o.color}">${o.color==='white'?'W':'B'}</span><span class="opening-title"><b>${esc(o.name)}</b><small>${o.eco} · ${esc(o.description)}</small></span><span class="line-count">${count}/${o.lines.length} lines</span><span class="chevron">⌄</span></button></div>${expanded?`<div class="line-list"><div class="line-list-head"><span>VARIATION</span><span>ROLE</span><button data-action="toggle-opening" data-id="${o.id}">${all?'Deselect all':'Select all'}</button></div>${o.lines.map(l=>`<div class="line-row"><label><input type="checkbox" data-line="${l.id}" ${state.selected.has(l.id)?'checked':''}><span class="fake-check">✓</span></label><span><b>${esc(l.name)}</b><small>${esc(l.moves.join(' '))}</small></span><select data-role="${l.id}"><option value="both" ${lineRole(l)==='both'?'selected':''}>Both</option><option value="white" ${lineRole(l)==='white'?'selected':''}>White</option><option value="black" ${lineRole(l)==='black'?'selected':''}>Black</option></select><span class="accuracy">${pct(state.stats[l.id])===null?'New':pct(state.stats[l.id])+'%'}</span></div>`).join('')}</div>`:''}</article>`;}
 function startSession(review=false,forcedLine=null){let line,color,startPly=0;if(review){const key=dueReviewKeys(state.positionStats,selectedPositionKeys())[0];if(!key)return;const node=theoryIndex.get(key),id=[...node.lineIds].find(x=>state.selected.has(x));line=workingLines().find(l=>l.id===id);const chess=new Chess();startPly=line.moves.findIndex((san,i)=>{const match=positionKey(chess.fen())===key;chess.move(san);return match;});color=node.turn==='w'?'white':'black';}else if(forcedLine){line=forcedLine;color=line.repertoireColor;}else{line=weightedPick(availableDrillLines(),state.stats);if(!line)return;color=state.side==='repertoire'?line.repertoireColor:state.side;}const drill=createDrill(line,color),chess=new Chess();for(let i=0;i<startPly;i++)chess.move(drill.positions[i].san);const turn=color==='white'?'w':'b';state.session={drill,chess,cursor:startPly,userMoves:0,mistakes:0,complete:false,busy:drill.positions[startPly]?.turn!==turn,lastMove:null,review,promptStartedAt:Date.now(),mistakePositions:[]};state.orientation=color;state.selectedSquare=null;state.message='';state.hintLevel=0;state.screen='drill';render();setTimeout(advanceOpponent,REPLY_PAUSE_MS);}
 async function advanceOpponent(){const s=state.session;if(!s||s.complete)return;const turn=s.drill.color==='white'?'w':'b';while(s.cursor<s.drill.positions.length&&s.drill.positions[s.cursor].turn!==turn){s.busy=true;const p=s.drill.positions[s.cursor];await animateMove(p.from,p.to);if(state.session!==s)return;s.chess.move(p.san);s.lastMove={from:p.from,to:p.to};s.cursor++;s.busy=false;render();if(s.cursor<s.drill.positions.length&&s.drill.positions[s.cursor].turn!==turn)await delay(REPLY_PAUSE_MS);}s.promptStartedAt=Date.now();if(s.cursor>=s.drill.positions.length)finishLine();render();}
 function recordPosition(s,correct,hinted=false){const p=s.drill.positions[s.cursor];if(!p)return;const key=positionKey(p.fen);state.positionStats[key]=updatePositionStat(state.positionStats[key],{correct,hinted,responseMs:Date.now()-s.promptStartedAt});if(!correct&&!s.mistakePositions.includes(key))s.mistakePositions.push(key);save();}
@@ -79,6 +81,7 @@ function handleClick(e){
   if(!el)return;
   const {action,id}=el.dataset;
   if(state.screen==='game-review'&&['dashboard','analyze','home','practice','progress','challenge','lessons'].includes(action))cancelReviewEngine();
+  if(['analysis','puzzle'].includes(state.screen)&&['dashboard','home','practice','progress','challenge','lessons'].includes(action))cancelAnalysisWork();
   const destinations={dashboard:'dashboard',analyze:'analysis',home:'library',practice:'practice',progress:'progress'};
   if(Object.hasOwn(destinations,action)){
     state.screen=destinations[action];
@@ -122,12 +125,54 @@ function handleClick(e){
     if(move)return acceptChallengeMove(c,move);
   }
   if(action==='export-pgn')download('chessdrill-repertoire.pgn',linesToPgn(workingLines().filter(l=>state.selected.has(l.id))),'application/x-chess-pgn');
-  if(action==='export-data')download('chessdrill-backup.json',JSON.stringify({version:2,...JSON.parse(localStorage.getItem(STORAGE_KEY)||'{}'),reviewCards:exportMistakeDeck()},null,2),'application/json');
+  if(action==='export-data')download('chessdrill-backup.json',JSON.stringify({...backupData(),reviewCards:exportMistakeDeck()},null,2),'application/json');
   if(action==='reset-stats'&&confirm('Reset all ChessDrill progress?')){state.stats={};state.positionStats={};save();}
   render();
 }
-function handleChange(e){const t=e.target;if(handleReviewInput(t))return;if(handleAnalysisInput(t))return;if(t.matches('[data-line]')){t.checked?state.selected.add(t.dataset.line):state.selected.delete(t.dataset.line);save();render();}if(t.matches('[data-role]')){state.lineRoles[t.dataset.role]=t.value;save();}if(t.id==='side'){state.side=t.value;save();}if(t.id==='timer'){state.timerSeconds=Number(t.value);save();}if(t.id==='focus'){state.focus=t.value;save();render();}if(t.id==='sort'){state.sort=t.value;save();render();}if(t.id==='catalog-search'){state.query=t.value;const caret=t.selectionStart;render();requestAnimationFrame(()=>{const input=document.querySelector('#catalog-search');if(input){input.focus();input.setSelectionRange(caret,caret);}});}if(t.id==='import-file'&&t.files[0]){const reader=new FileReader();reader.onload=()=>{try{const text=String(reader.result);if(t.files[0].name.endsWith('.json')){const d=JSON.parse(text);if(Object.hasOwn(d,'reviewCards'))restoreMistakeDeck(d.reviewCards);state.stats=d.stats||{};state.positionStats=d.positionStats||{};state.lessonCompleted=d.lessonCompleted||{};state.lineRoles=d.lineRoles||{};state.customLines=d.customLines||[];state.selected=new Set(d.selected||[]);}else{const lines=parsePgnCollection(text,new Set(workingLines().map(l=>l.id)));state.customLines.push(...lines);lines.forEach(l=>state.selected.add(l.id));state.expanded.add('custom-repertoire');}rebuildIndex();save();render();}catch{alert('That file could not be imported.');}};reader.readAsText(t.files[0]);}}
-function studyOpening(name){const normalized=s=>s.toLowerCase().replace(/[’']/g,'').replace(/\b([a-z]{3,})s\b/g,'$1').replace(/[^a-z0-9]/g,'');const target=normalized(name);const opening=workingOpenings().filter(o=>target.includes(normalized(o.name))||normalized(o.name).includes(target)).sort((a,b)=>b.name.length-a.name.length)[0];state.screen='library';state.level='advanced';state.query=opening?.name||'';if(opening){state.expanded.add(opening.id);const main=opening.lines.find(l=>l.name==='Main line')||opening.lines[0];if(main)state.selected.add(main.id);}save();render();}
+function handleChange(e){
+  const t=e.target;
+  if(e.type==='input' && t.type==='file')return;
+  if(handleReviewInput(t)||handleAnalysisInput(t))return;
+  if(t.matches('[data-line]')){t.checked?state.selected.add(t.dataset.line):state.selected.delete(t.dataset.line);save();render();return;}
+  if(t.matches('[data-role]')){state.lineRoles[t.dataset.role]=t.value;save();return;}
+  if(t.id==='side'){state.side=t.value;save();return;}
+  if(t.id==='timer'){state.timerSeconds=Number(t.value);save();return;}
+  if(t.id==='focus'){state.focus=t.value;save();render();return;}
+  if(t.id==='sort'){state.sort=t.value;save();render();return;}
+  if(t.id==='catalog-search'){state.query=t.value;updateOpeningResults();return;}
+  if(t.id==='import-file' && t.files?.[0]) void importStudyFile(t.files[0]);
+}
+
+async function importStudyFile(file){
+  state.progressImportOpen=true;
+  if(file.size>2_000_000){state.importNotice='Choose a file under 2 MB.';render();return;}
+  try{
+    const text=await file.text();
+    const known=new Set(allLines().map(line=>line.id));
+    if(/\.json$/i.test(file.name)){
+      const raw=JSON.parse(text);
+      const data=validateBackup(raw,known,OPENINGS.map(o=>o.id),OPENING_LESSONS.map(l=>l.id));
+      const nextIndex=buildPositionIndex([...allLines(),...data.customLines]);
+      if(Object.hasOwn(raw,'reviewCards'))restoreMistakeDeck(raw.reviewCards);
+      Object.assign(state,{...data,selected:new Set(data.selected),expanded:new Set(data.expanded)});
+      theoryIndex=nextIndex;
+      state.importNotice='Backup imported. Your openings and practice history are ready.';
+    }else{
+      const lines=parsePgnCollection(text,new Set(workingLines().map(line=>line.id)));
+      if(!lines.length)throw new Error('No playable chess lines were found in that PGN.');
+      const validated=validateBackup({...backupData(),customLines:[...state.customLines,...lines]},known,OPENINGS.map(o=>o.id),OPENING_LESSONS.map(l=>l.id));
+      const nextIndex=buildPositionIndex([...allLines(),...validated.customLines]);
+      state.customLines=validated.customLines;
+      for(const line of lines)state.selected.add(line.id);
+      state.expanded.add('custom-repertoire');
+      theoryIndex=nextIndex;
+      state.importNotice=`${lines.length} ${lines.length===1?'opening line':'opening lines'} imported and selected.`;
+    }
+    save();render();
+  }catch(error){state.importNotice=error instanceof Error?error.message:'That file could not be imported.';render();}
+}
+
+function studyOpening(name){cancelAnalysisWork();cancelReviewEngine();const normalized=s=>s.toLowerCase().replace(/[’']/g,'').replace(/\b([a-z]{3,})s\b/g,'$1').replace(/[^a-z0-9]/g,'');const target=normalized(name);const opening=workingOpenings().filter(o=>target.includes(normalized(o.name))||normalized(o.name).includes(target)).sort((a,b)=>b.name.length-a.name.length)[0];state.screen='library';state.level='advanced';state.query=opening?.name||'';if(opening){state.expanded.add(opening.id);const main=opening.lines.find(l=>l.name==='Main line')||opening.lines[0];if(main)state.selected.add(main.id);}save();render();}
 function render(){
   const selected=availableDrillLines();
   const due=dueReviewKeys(state.positionStats,selectedPositionKeys()).length;
@@ -149,7 +194,7 @@ function render(){
   }
   document.querySelector('#app').innerHTML=view;
 }
-connectAnalysis({render,studyOpening,navigate:screen=>{state.screen=screen;render();}});connectReview({render,studyOpening,navigate:screen=>{state.screen=screen;render();}});document.addEventListener('click',handleClick);document.addEventListener('change',handleChange);document.addEventListener('input',handleChange);document.addEventListener('submit',e=>{if(e.target.id==='analysis-form')void submitAnalysis(e);if(e.target.id==='review-pgn-form')submitReviewPgn(e);});render();
+connectAnalysis({render,studyOpening,navigate:screen=>{if(screen!=='analysis')cancelAnalysisWork();state.screen=screen;render();}});connectReview({render,studyOpening,navigate:screen=>{cancelAnalysisWork();state.screen=screen;render();}});document.addEventListener('click',handleClick);document.addEventListener('change',handleChange);document.addEventListener('input',handleChange);document.addEventListener('submit',e=>{if(e.target.id==='analysis-form')void submitAnalysis(e);if(e.target.id==='review-pgn-form')submitReviewPgn(e);});render();
 document.addEventListener('click',e=>{
   const link=e.target.closest('a[target="_blank"]');
   if(link && link.href.startsWith('https://') && window.ChessStudioNative?.postMessage){
@@ -161,6 +206,7 @@ document.addEventListener('click',e=>{
 window.chessStudioBack=()=>{
   if(state.screen==='dashboard')return false;
   if(state.screen==='game-review')cancelReviewEngine();
+  if(['analysis','puzzle'].includes(state.screen))cancelAnalysisWork();
   const next={lesson:'lessons',drill:'practice','challenge-play':'challenge-setup','challenge-setup':'practice',puzzle:'analysis','review-practice':'practice','game-review':'analysis'};
   state.screen=next[state.screen]||'dashboard';
   state.session=null;state.challenge=null;state.selectedSquare=null;state.pendingOutOfBook=null;
@@ -169,20 +215,33 @@ window.chessStudioBack=()=>{
 
 function libraryView(){
   const catalog=levelCatalog(),selected=availableDrillLines();
-  let visible=catalog.filter(o=>state.focus==='all'||o.color===state.focus);
-  const query=state.query.trim().toLowerCase();
-  if(query)visible=visible.filter(o=>`${o.name} ${o.eco} ${o.lines.map(l=>l.name).join(' ')}`.toLowerCase().includes(query));
-  visible.sort((a,b)=>state.sort==='name'?a.name.localeCompare(b.name):state.sort==='lines'?b.lines.length-a.lines.length:a.eco.localeCompare(b.eco)||a.name.localeCompare(b.name));
+  const visible=visibleOpenings();
   return appShell(`<main class="page openings-page">
     <header class="openings-intro"><div><p class="eyebrow">YOUR REPERTOIRE</p><h1>Openings</h1><p>Learn a plan, choose your lines, then practice the key moves.</p></div><div class="openings-intro-actions"><button class="secondary" data-action="lessons">Guided lessons →</button><button class="primary" data-action="start" ${selected.length?'':'disabled'}>Drill ${selected.length} ${selected.length===1?'line':'lines'} →</button></div></header>
     <section class="opening-level" aria-label="Library level"><span>Show openings for</span><div class="level-switch">${['beginner','intermediate','advanced'].map(x=>`<button class="${state.level===x?'active':''}" data-action="level" data-id="${x}" aria-pressed="${state.level===x}">${x[0].toUpperCase()+x.slice(1)}</button>`).join('')}</div></section>
+    <details class="opening-secondary"><summary>Drill settings</summary><div class="opening-settings"><label>Practice side<select id="side"><option value="repertoire">Line repertoire side</option><option value="white" ${state.side==='white'?'selected':''}>White only</option><option value="black" ${state.side==='black'?'selected':''}>Black only</option></select></label><label>Recall clock<select id="timer"><option value="0">Untimed</option><option value="15" ${state.timerSeconds===15?'selected':''}>15 seconds</option><option value="5" ${state.timerSeconds===5?'selected':''}>5 seconds</option><option value="2" ${state.timerSeconds===2?'selected':''}>2 seconds</option></select></label></div></details>
     <section class="library"><div class="section-heading"><div><p class="eyebrow">${catalog.length} FAMILIES · ${catalog.reduce((n,o)=>n+o.lines.length,0).toLocaleString()} LINES</p><h2>Choose lines to practice</h2></div><div class="selection-actions"><button data-action="select-visible">Select level</button><button data-action="clear">Clear</button></div></div>
       <div class="catalog-tools"><label class="catalog-search"><span>⌕</span><input id="catalog-search" value="${esc(state.query)}" placeholder="Search openings, variations, or ECO…"></label><select id="focus" aria-label="Filter by side"><option value="all">All openings</option><option value="white" ${state.focus==='white'?'selected':''}>White repertoire</option><option value="black" ${state.focus==='black'?'selected':''}>Black repertoire</option></select><select id="sort" aria-label="Sort openings"><option value="eco">ECO order</option><option value="name" ${state.sort==='name'?'selected':''}>Name A–Z</option><option value="lines" ${state.sort==='lines'?'selected':''}>Most variations</option></select><button class="short-lines-toggle ${state.showShortLines?'active':''}" data-action="toggle-short"><span>${state.showShortLines?'✓':''}</span> Show lines under 4 moves</button></div>
+      <p class="catalog-result-count" id="catalog-result-count" role="status">${visible.length} ${visible.length===1?'opening':'openings'} shown</p>
       <div class="opening-list">${visible.map(openingCard).join('')||'<div class="no-results">No openings match those filters.</div>'}</div>
     </section>
-    <details class="opening-secondary"><summary>Drill settings</summary><div class="opening-settings"><label>Practice side<select id="side"><option value="repertoire">Line repertoire side</option><option value="white" ${state.side==='white'?'selected':''}>White only</option><option value="black" ${state.side==='black'?'selected':''}>Black only</option></select></label><label>Recall clock<select id="timer"><option value="0">Untimed</option><option value="15" ${state.timerSeconds===15?'selected':''}>15 seconds</option><option value="5" ${state.timerSeconds===5?'selected':''}>5 seconds</option><option value="2" ${state.timerSeconds===2?'selected':''}>2 seconds</option></select></label></div></details>
     <details class="opening-secondary"><summary>Suggested openings</summary>${recommendationsView()}</details>
   </main>`);
+}
+
+function visibleOpenings(){
+  let visible=levelCatalog().filter(o=>state.focus==='all'||o.color===state.focus);
+  const query=state.query.trim().toLowerCase();
+  if(query)visible=visible.filter(o=>`${o.name} ${o.eco} ${o.lines.map(l=>l.name).join(' ')}`.toLowerCase().includes(query));
+  return visible.sort((a,b)=>state.sort==='name'?a.name.localeCompare(b.name):state.sort==='lines'?b.lines.length-a.lines.length:a.eco.localeCompare(b.eco)||a.name.localeCompare(b.name));
+}
+
+function updateOpeningResults(){
+  const visible=visibleOpenings();
+  const list=document.querySelector('.opening-list');
+  const count=document.querySelector('#catalog-result-count');
+  if(list)list.innerHTML=visible.map(openingCard).join('')||'<div class="no-results">No openings match those filters.</div>';
+  if(count)count.textContent=`${visible.length} ${visible.length===1?'opening':'openings'} shown`;
 }
 
 function progressView(){
@@ -197,7 +256,7 @@ function progressView(){
   return appShell(`<main class="page progress-page"><p class="eyebrow">YOUR STUDY RECORD</p><h1>Progress</h1>
     <section class="stat-grid"><div><span>${coverage.practiced}/${coverage.positions}</span><small>opening positions seen</small></div><div><span>${due}</span><small>opening positions due</small></div><div><span>${coverage.mastery}%</span><small>estimated mastery</small></div></section>
     <div class="progress-summary"><span>${learned}/${OPENING_LESSONS.length} lessons learned</span><span>${deck.total} game positions saved · ${deck.due} due</span><button class="text-button" data-action="practice">Go to practice →</button></div>
+    <details class="opening-secondary progress-tools" ${state.progressImportOpen?'open':''}><summary>Import, export, and reset</summary><div class="progress-actions"><button class="secondary" data-action="export-pgn">Export selected PGN</button><button class="secondary" data-action="export-data">Back up progress</button><label class="secondary file-button">Import PGN / backup<input id="import-file" type="file" accept=".pgn,.json,text/plain"></label><button class="secondary" data-action="reset-stats">Reset practice stats</button></div><p>Your backup includes selected lines, lessons, opening reviews, and game puzzles.</p>${state.importNotice?`<p class="import-notice" role="status">${esc(state.importNotice)}</p>`:''}</details>
     <section class="progress-list"><div class="section-heading"><h2>Repertoire coverage</h2><button class="text-button" data-action="home">Choose openings →</button></div>${families.length?families.map(({o,lines,c})=>`<div class="coverage-row"><span><b>${esc(o.name)}</b><small>${lines.length} selected lines · ${c.practiced}/${c.positions} positions seen · ${c.due} due</small></span><div class="mastery"><i style="width:${c.mastery}%"></i></div><strong>${c.mastery}%</strong></div>`).join(''):'<div class="empty"><h3>No repertoire selected yet</h3><p>Choose an opening to start building your coverage map.</p><button class="primary" data-action="home">Choose openings →</button></div>'}</section>
-    <details class="opening-secondary progress-tools"><summary>Import, export, and reset</summary><div class="progress-actions"><button class="secondary" data-action="export-pgn">Export selected PGN</button><button class="secondary" data-action="export-data">Back up progress</button><label class="secondary file-button">Import PGN / backup<input id="import-file" type="file" accept=".pgn,.json,text/plain"></label><button class="secondary" data-action="reset-stats">Reset practice stats</button></div><p>Your backup includes selected lines, lessons, opening reviews, and game puzzles.</p></details>
   </main>`);
 }

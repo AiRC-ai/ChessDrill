@@ -22,7 +22,7 @@ it('explains a saved game puzzle after reveal and keeps older cards usable', () 
   handleReviewAction({dataset:{action:'review-reveal'}});
   expect(reviewPracticeView()).toContain('WHY THE ENGINE PREFERS IT');
   expect(reviewPracticeView()).toContain('Qh4# was checkmate');
-  expect(reviewPracticeView()).toContain('Qh4+ can be met by g3');
+  expect(reviewPracticeView()).toContain('legal answer to the check is g3');
   expect(reviewPracticeView()).toContain('After e3');
   handleReviewAction({dataset:{action:'review-line-step',index:'0'}});
   expect(reviewPracticeView()).toContain('Starting position · illustrative engine line');

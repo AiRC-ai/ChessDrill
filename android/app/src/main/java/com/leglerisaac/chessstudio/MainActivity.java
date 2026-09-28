@@ -168,7 +168,10 @@ public class MainActivity extends Activity {
     }
 
     private void openExternal(Uri uri) {
-        if (!"https".equals(uri.getScheme()) && !"http".equals(uri.getScheme())) return;
+        String host = uri.getHost();
+        if (!"https".equalsIgnoreCase(uri.getScheme()) || host == null ||
+            !("chess.com".equalsIgnoreCase(host) || "www.chess.com".equalsIgnoreCase(host) ||
+              "lichess.org".equalsIgnoreCase(host) || "www.lichess.org".equalsIgnoreCase(host))) return;
         try {
             startActivity(new Intent(Intent.ACTION_VIEW, uri));
         } catch (ActivityNotFoundException error) {

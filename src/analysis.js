@@ -13,14 +13,16 @@ const displayPlatform = platform => platform === 'lichess' ? 'Lichess' : 'Chess.
 const safeUrl = value => {
   try {
     const url = new URL(value);
-    return url.protocol === 'https:' && ['lichess.org','www.lichess.org','chess.com','www.chess.com'].includes(url.hostname) ? esc(url.href) : '#';
+    return url.protocol === 'https:' && !url.username && !url.password && !url.port && ['lichess.org','www.lichess.org','chess.com','www.chess.com'].includes(url.hostname) ? esc(url.href) : '#';
   } catch { return '#'; }
 };
 
 function readStored() {
   try {
     const data = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-    return {report: data.report || null, history: Array.isArray(data.history) ? data.history.slice(0, 8) : [], games: Array.isArray(data.games) ? data.games.slice(0, 8) : []};
+    const report = data.report;
+    const validReport = report && typeof report.username === 'string' && report.record && report.metrics && Array.isArray(report.strengths) && Array.isArray(report.weaknesses) && Array.isArray(report.recommendations) && Array.isArray(report.phases) && Array.isArray(report.openings) && Array.isArray(report.recentGames) && Array.isArray(report.trainingPositions) && (!report.engineAnalysis || Array.isArray(report.engineAnalysis.criticalMoments));
+    return {report: validReport ? report : null, history: Array.isArray(data.history) ? data.history.filter(item=>item && typeof item.username === 'string' && Number.isFinite(item.score)).slice(0, 8) : [], games: Array.isArray(data.games) ? data.games.filter(item=>item && typeof item.pgn === 'string' && typeof item.url === 'string').slice(0, 8) : []};
   } catch { return {report: null, history: [], games: []}; }
 }
 
@@ -42,6 +44,8 @@ export const analysis = {
   showPlan: false,
 };
 let controller = null;
+let engineController = null;
+export function cancelAnalysisWork() { controller?.abort(); engineController?.abort(); }
 let render = () => {};
 let studyOpening = () => {};
 let navigate = () => {};
@@ -98,7 +102,7 @@ function reportView(report) {
     <section class="analysis-panel"><div class="analysis-section-head"><div><p class="eyebrow">THE PRACTICE QUEUE</p><h3>Three themes from your games</h3></div><span>Start with the first theme</span></div><div class="puzzle-grid">${report.recommendations.map((item,index) => `<article><small>${String(index+1).padStart(2,'0')} / ${index === 0 ? 'START HERE' : index === 1 ? 'NEXT' : 'MAINTAIN'}</small><h4>${esc(item.category)}</h4><p>${esc(item.reason)}</p><strong>${esc(item.practice)}</strong><span>${esc(item.signal)}</span><a href="${report.platform === 'lichess' ? `https://lichess.org/training/${encodeURIComponent(item.lichessTheme)}` : 'https://www.chess.com/puzzles/learning'}" target="_blank" rel="noopener noreferrer">Practice on ${esc(displayPlatform(report.platform))} ↗</a></article>`).join('')}</div></section>
     <div class="analysis-two-col"><section class="analysis-panel"><p class="eyebrow">GAME PHASES</p><h3>Where to focus</h3>${report.phases.map(phase => `<div class="phase-line"><div><b>${esc(phase.phase)}</b><strong>${esc(phase.display)}</strong></div><div class="mastery"><i style="width:${Number(phase.value) || 0}%"></i></div><small>${esc(phase.detail)} · ${phase.sample} games</small></div>`).join('')}</section><section class="analysis-panel"><p class="eyebrow">OPENING BRIDGE</p><h3>Take these into ChessDrill</h3>${report.openings.slice(0, 6).map(opening => `<div class="report-opening"><div><b>${esc(opening.name)}</b><small>${opening.games} ${opening.games===1?'game':'games'} · ${opening.scorePct}% result score</small></div><button class="secondary" data-action="study-opening" data-opening="${esc(opening.name)}">Find lines →</button></div>`).join('') || '<p>More games will reveal recurring openings.</p>'}</section></div>
     <section class="analysis-panel"><div class="analysis-section-head"><div><p class="eyebrow">TURN INSIGHT INTO HABIT</p><h3>Four-week practice plan</h3></div><button class="secondary" data-action="toggle-plan">${analysis.showPlan ? 'Hide plan' : 'Show plan'}</button></div><p>${esc(plan.headline)}</p>${analysis.showPlan ? `<div class="plan-grid">${plan.plan.map(week => `<article><small>WEEK ${week.week}</small><h4>${esc(week.title)}</h4><b>${esc(week.focus)}</b><ul>${week.sessions.map(session => `<li>${esc(session)}</li>`).join('')}</ul><p>${esc(week.checkpoint)}</p></article>`).join('')}</div>` : ''}</section>
-    ${engine ? `<section class="analysis-panel"><div class="analysis-section-head"><div><p class="eyebrow">STOCKFISH 19 LITE · LOCAL BROWSER ANALYSIS</p><h3>Critical decisions</h3></div><button class="primary" data-action="train-moments" ${engine.criticalMoments.length?'':'disabled'}>Practice these positions →</button></div><p>${engine.movesAnalyzed} decisions from ${engine.gamesAnalyzed} ${engine.gamesAnalyzed===1?'game':'games'} · ${engine.mistakes} ${engine.mistakes===1?'mistake':'mistakes'} · ${engine.blunders} ${engine.blunders===1?'blunder':'blunders'}</p><div class="evidence-list">${engine.criticalMoments.slice(0, 8).map(moment => `<article><span class="moment-tag">${esc(moment.classification)}</span><div><b>${esc(moment.playedMove)} → ${esc(moment.bestMoveSan)}</b><small>Move ${moment.moveNumber} against ${esc(moment.opponent)} · ${esc(moment.phase)} · ${Math.round(moment.centipawnLoss)} cp lost</small><p>${esc(moment.reason)}</p></div><a href="${safeUrl(moment.gameUrl)}" target="_blank" rel="noopener noreferrer">Game ↗</a></article>`).join('')}</div></section>` : `<section class="engine-panel"><div><p class="eyebrow">GO ONE LEVEL DEEPER</p><h3>Check your decisions with Stockfish</h3><p>Analyze up to 48 decisions in three recent games. The engine runs in your browser; positions stay on your device.${analysis.games.length?'':' Reanalyze this account to enable the engine for a saved report.'}</p></div><button class="primary" data-action="run-engine" ${analysis.games.length && !analysis.engineBusy ? '' : 'disabled'}>${analysis.engineBusy ? `Checking positions… ${analysis.enginePercent}%` : 'Run local engine →'}</button></section>`}
+    ${engine ? `<section class="analysis-panel"><div class="analysis-section-head"><div><p class="eyebrow">STOCKFISH 19 LITE · LOCAL BROWSER ANALYSIS</p><h3>Critical decisions</h3></div><button class="primary" data-action="train-moments" ${engine.criticalMoments.length?'':'disabled'}>Practice these positions →</button></div><p>${engine.movesAnalyzed} decisions from ${engine.gamesAnalyzed} ${engine.gamesAnalyzed===1?'game':'games'} · ${engine.mistakes} ${engine.mistakes===1?'mistake':'mistakes'} · ${engine.blunders} ${engine.blunders===1?'blunder':'blunders'}</p><div class="engine-control">${analysis.engineBusy?`<span role="status">${esc(analysis.progress)} · ${analysis.enginePercent}%</span><button class="secondary" data-action="cancel-analysis-engine">Stop engine</button>`:`<button class="secondary" data-action="run-engine" ${analysis.games.length?'':'disabled title="Analyze this account again to load its games"'}>Recheck with engine</button>`}</div><div class="evidence-list">${engine.criticalMoments.slice(0, 8).map(moment => `<article><span class="moment-tag">${esc(moment.classification)}</span><div><b>${esc(moment.playedMove)} → ${esc(moment.bestMoveSan)}</b><small>Move ${moment.moveNumber} against ${esc(moment.opponent)} · ${esc(moment.phase)} · ${Math.round(moment.centipawnLoss)} cp lost</small><p>${esc(explainBestMove({fen:moment.fen,bestMove:moment.bestMove,bestLine:moment.bestLine,playedSan:moment.playedMove,punishmentMove:moment.punishmentMove,punishmentSan:moment.punishmentMoveSan,loss:moment.centipawnLoss}).why)}</p></div><a href="${safeUrl(moment.gameUrl)}" target="_blank" rel="noopener noreferrer">Game ↗</a></article>`).join('')}</div></section>` : `<section class="engine-panel"><div><p class="eyebrow">GO ONE LEVEL DEEPER</p><h3>Check your decisions with Stockfish</h3><p>Analyze up to 48 decisions in three recent games. The engine runs in your browser; positions stay on your device.${analysis.games.length?'':' Reanalyze this account to enable the engine for a saved report.'}</p></div>${analysis.engineBusy?`<div class="engine-control"><span role="status">${esc(analysis.progress)} · ${analysis.enginePercent}%</span><button class="secondary" data-action="cancel-analysis-engine">Stop engine</button></div>`:`<button class="primary" data-action="run-engine" ${analysis.games.length?'':'disabled'}>Run local engine →</button>`}</section>`}
     <section class="analysis-panel"><p class="eyebrow">EVIDENCE FROM YOUR GAMES</p><h3>Moments worth reviewing</h3><div class="evidence-list">${report.trainingPositions.slice(0, 8).map(position => `<article><span class="moment-tag">${esc(position.category)}</span><div><b>Move ${position.moveNumber} · ${esc(position.opening)}</b><small>${esc(position.color)} against ${esc(position.opponent)} · played ${esc(position.playedMove)}</small><p>${esc(position.reason)}</p></div><a href="${safeUrl(position.gameUrl)}" target="_blank" rel="noopener noreferrer">Game ↗</a></article>`).join('') || '<p>No repeated tactical evidence in this sample. Try a larger sample.</p>'}</div></section>
     <section class="analysis-panel"><div class="analysis-section-head"><div><p class="eyebrow">FROM DATA TO DECISIONS</p><h3>Game review lab</h3></div><span>On-demand engine review</span></div><p>Choose a game below to replay every move, check each decision with Stockfish, and save your missed positions to a personal practice deck.</p></section>
     <section class="analysis-panel"><p class="eyebrow">AUDIT TRAIL</p><h3>Games in this sample</h3><div class="report-table-wrap"><table><thead><tr><th>Result</th><th>Opponent</th><th>Color</th><th>Format</th><th>Opening</th><th>Date</th><th>Review</th><th>Game</th></tr></thead><tbody>${report.recentGames.map(game => `<tr><td><span class="result-pill ${esc(game.outcome)}">${esc(game.outcome)}</span></td><td>${esc(game.opponent)} <small>${game.opponentRating}</small></td><td>${esc(game.color)}</td><td>${esc(game.timeClass)}</td><td>${esc(game.opening)}</td><td>${date(game.endTime)}</td><td><button class="review-table-button" data-action="review-game" data-url="${esc(game.url)}" ${analysis.games.some(item=>item.url===game.url)?'':'disabled title="Analyze this account again to load its PGN"'}>Review →</button></td><td><a href="${safeUrl(game.url)}" target="_blank" rel="noopener noreferrer">Open ↗</a></td></tr>`).join('')}</tbody></table></div></section>
@@ -111,7 +115,7 @@ function finding(item) {
 
 export function analysisView() {
   return `<main class="page analysis-page"><section class="analysis-hero"><div><p class="eyebrow">GAME REVIEW</p><h1>Review your games.</h1><p>Analyze a public Chess.com or Lichess account, or import a PGN below.</p></div></section>
-    <form id="analysis-form" class="analysis-form"><div class="analysis-form-title"><div><p class="eyebrow">START WITH THE EVIDENCE</p><h2>Analyze a player</h2></div><small>Public games only · No account connection</small></div><div class="analysis-form-grid"><label>Platform<select id="analysis-platform"><option value="chesscom" ${analysis.platform === 'chesscom'?'selected':''}>Chess.com</option><option value="lichess" ${analysis.platform === 'lichess'?'selected':''}>Lichess</option></select></label><label>Username<input id="analysis-username" required autocomplete="off" spellcheck="false" placeholder="Your username" value="${esc(analysis.username)}"></label><label>Recent games<select id="analysis-count">${[10,20,30,50,100].map(n => `<option value="${n}" ${analysis.count === n?'selected':''}>${n} games</option>`).join('')}</select></label><label>Format<select id="analysis-filter">${formats[analysis.platform].map(([value,label])=>`<option value="${value}" ${analysis.filter===value?'selected':''}>${label}</option>`).join('')}</select></label></div><div class="analysis-form-bottom"><span>Standard chess only. Your games are analyzed in this browser.</span><div>${analysis.busy ? '<button class="secondary" type="button" data-action="cancel-analysis">Cancel</button>' : ''}<button class="primary" type="submit" ${analysis.busy?'disabled':''}>${analysis.busy?'Analyzing…':'Analyze games →'}</button></div></div>${analysis.busy ? `<div class="analysis-progress" role="status"><b>${esc(analysis.progress)}</b><span>${analysis.progressPercent}%</span><div><i style="width:${analysis.progressPercent}%"></i></div></div>` : ''}${analysis.error ? `<p class="analysis-error" role="alert">${esc(analysis.error)}</p>` : ''}</form>
+    <form id="analysis-form" class="analysis-form"><div class="analysis-form-title"><div><p class="eyebrow">START WITH THE EVIDENCE</p><h2>Analyze a player</h2></div><small>Public games only · No account connection</small></div><div class="analysis-form-grid"><label>Platform<select id="analysis-platform" ${analysis.busy?'disabled':''}><option value="chesscom" ${analysis.platform === 'chesscom'?'selected':''}>Chess.com</option><option value="lichess" ${analysis.platform === 'lichess'?'selected':''}>Lichess</option></select></label><label>Username<input id="analysis-username" ${analysis.busy?'disabled':''} required autocomplete="off" spellcheck="false" placeholder="Your username" value="${esc(analysis.username)}"></label><label>Recent games<select id="analysis-count" ${analysis.busy?'disabled':''}>${[10,20,30,50,100].map(n => `<option value="${n}" ${analysis.count === n?'selected':''}>${n} games</option>`).join('')}</select></label><label>Format<select id="analysis-filter" ${analysis.busy?'disabled':''}>${formats[analysis.platform].map(([value,label])=>`<option value="${value}" ${analysis.filter===value?'selected':''}>${label}</option>`).join('')}</select></label></div><div class="analysis-form-bottom"><span>Standard chess only. Your games are analyzed in this browser.</span><div>${analysis.busy ? '<button class="secondary" type="button" data-action="cancel-analysis">Cancel</button>' : ''}<button class="primary" type="submit" ${analysis.busy?'disabled':''}>${analysis.busy?'Analyzing…':'Analyze games →'}</button></div></div>${analysis.busy ? `<div class="analysis-progress" role="status"><b>${esc(analysis.progress)}</b><span>${analysis.progressPercent}%</span><div><i style="width:${analysis.progressPercent}%"></i></div></div>` : ''}${analysis.error ? `<p class="analysis-error" role="alert">${esc(analysis.error)}</p>` : ''}</form>
     ${reviewPgnFormView()}
     ${analysis.busy ? '' : analysis.report ? reportView(analysis.report) : ''}
     <p class="analysis-privacy">Pattern findings describe the sampled games. Engine review is available separately. Reports stay on this device.</p>
@@ -130,6 +134,7 @@ export function handleAnalysisAction(element) {
   switch (element.dataset.action) {
     case 'cancel-analysis': controller?.abort(); return true;
     case 'run-engine': void runEngine(); return true;
+    case 'cancel-analysis-engine': engineController?.abort(); return true;
     case 'toggle-plan': analysis.showPlan = !analysis.showPlan; render(); return true;
     case 'print-report': window.print(); return true;
     case 'study-opening': studyOpening(element.dataset.opening); return true;
@@ -150,11 +155,13 @@ export function handleAnalysisAction(element) {
 export async function submitAnalysis(event) {
   event.preventDefault();
   if (analysis.busy) return;
+  engineController?.abort();
   const platform = analysis.platform;
   const username = platform === 'lichess' ? normalizeLichess(analysis.username) : normalizeChessCom(analysis.username);
   const valid = platform === 'lichess' ? validateLichess(username) : validateChessCom(username);
   if (!valid) { analysis.error = `Enter a valid ${displayPlatform(platform)} username.`; render(); return; }
   controller = new AbortController();
+  const current = controller;
   analysis.busy = true;
   analysis.error = '';
   analysis.progress = 'Finding public games…';
@@ -163,35 +170,39 @@ export async function submitAnalysis(event) {
   analysis.games = [];
   render();
   try {
-    const fetched = await (platform === 'lichess' ? fetchLichess : fetchChessCom)({username, count: analysis.count, filter: analysis.filter, signal: controller.signal, onProgress: progress => { analysis.progress = progress.label; analysis.progressPercent = progress.percent; render(); }});
-    if (controller.signal.aborted) return;
+    const fetched = await (platform === 'lichess' ? fetchLichess : fetchChessCom)({username, count: analysis.count, filter: analysis.filter, signal: current.signal, onProgress: progress => { if (!current.signal.aborted) { analysis.progress = progress.label; analysis.progressPercent = progress.percent; render(); } }});
+    if (current.signal.aborted) return;
     analysis.progress = `Replaying ${fetched.games.length} games…`;
     analysis.progressPercent = 78;
     render();
     await new Promise(resolve => requestAnimationFrame(resolve));
     const report = analyzeGames(fetched.profile.username, fetched.games, analysis.count, platform);
-    if (controller.signal.aborted) return;
+    if (current.signal.aborted) return;
     analysis.games = fetched.games;
     saveReport(report);
     requestAnimationFrame(() => document.querySelector('#report')?.scrollIntoView({behavior:'smooth',block:'start'}));
   } catch (error) {
-    analysis.error = controller.signal.aborted ? 'Analysis cancelled.' : error instanceof Error ? error.message : 'Unable to analyze those games.';
-  } finally { analysis.busy = false; controller = null; render(); }
+    analysis.error = current.signal.aborted ? 'Analysis cancelled.' : error instanceof Error ? error.message : 'Unable to analyze those games.';
+  } finally { if (controller===current) {analysis.busy = false; controller = null; render();} }
 }
 
 async function runEngine() {
   if (!analysis.games.length || analysis.engineBusy || !analysis.report) return;
+  const report=analysis.report;
+  const current=new AbortController();
+  engineController=current;
   analysis.engineBusy = true;
   analysis.enginePercent = 0;
   analysis.error = '';
   render();
   try {
     const {analyzeGamesWithEngine, engineSupported} = await import('./movemirror/stockfish.ts');
+    if(current.signal.aborted)return;
     if (!engineSupported()) throw new Error('This browser does not support local Stockfish analysis.');
-    const engine = await analyzeGamesWithEngine(analysis.games, analysis.report.username, {maxGames:3,maxMoves:48,depth:9,onProgress: progress => {analysis.enginePercent = progress.percent; analysis.progress = progress.label; render();}});
-    saveReport(applyEngineAnalysis(analysis.report, engine));
-  } catch (error) { analysis.error = error instanceof Error ? error.message : 'Stockfish could not complete this analysis.'; }
-  finally { analysis.engineBusy = false; render(); }
+    const engine = await analyzeGamesWithEngine(analysis.games, report.username, {maxGames:3,maxMoves:48,depth:9,signal:current.signal,onProgress: progress => {if(!current.signal.aborted){analysis.enginePercent = progress.percent; analysis.progress = progress.label; render();}}});
+    if(!current.signal.aborted && analysis.report===report)saveReport(applyEngineAnalysis(report, engine));
+  } catch (error) { if(analysis.report===report)analysis.error = current.signal.aborted ? 'Engine analysis stopped.' : error instanceof Error ? error.message : 'Stockfish could not complete this analysis.'; }
+  finally { if(engineController===current){analysis.engineBusy = false; engineController=null; render();} }
 }
 
 function moments() { return analysis.report?.engineAnalysis?.criticalMoments || []; }
