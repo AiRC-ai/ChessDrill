@@ -207,6 +207,10 @@ export function startDueMistakes() {
   chooseQuiz(deck.filter(card=>card.due <= Date.now()).sort((a,b)=>a.due-b.due).map(card=>card.id));
 }
 
+export function startAllMistakes() {
+  chooseQuiz([...deck].sort((a,b)=>a.due-b.due).map(card=>card.id));
+}
+
 function activeCard() { return deck.find(card=>card.id===state.quiz?.ids[state.quiz.cursor]); }
 
 function studyEvidence(card) {
@@ -346,6 +350,7 @@ export function handleReviewAction(element) {
       return true;
     }
     case 'practice-due-mistakes': startDueMistakes(); return true;
+    case 'practice-all-mistakes': startAllMistakes(); return true;
     case 'study-review-opening': studyOpening(state.review?.opening); return true;
     case 'export-review-pgn': downloadReview(); return true;
     case 'review-hint': if (state.quiz) {state.quiz.hint=Math.min(2,state.quiz.hint+1);render();} return true;

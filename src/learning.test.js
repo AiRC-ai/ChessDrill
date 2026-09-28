@@ -1,12 +1,26 @@
 import { describe, expect, it } from 'vitest';
 import { Chess } from 'chess.js';
-import { buildPositionIndex, duePositionKeys, linesToPgn, parsePgnCollection, positionKey, positionOptions, updatePositionStat } from './learning.js';
+import { buildPositionIndex, coverageForLines, duePositionKeys, linesToPgn, openingInsight, parsePgnCollection, positionKey, positionOptions, updatePositionStat } from './learning.js';
 import { parseMove } from './drill.js';
 
 const lines = [
   { id:'a', name:'A', openingName:'Test', moves:['Nf3','d5','g3','Nf6'] },
   { id:'b', name:'B', openingName:'Test', moves:['g3','d5','Nf3','Nf6'] },
 ];
+
+it('teaches the White attack and Black defense as different openings', () => {
+  expect(openingInsight("King's Indian Attack").plan).toContain('As White');
+  expect(openingInsight("King's Indian Defense").plan).toContain('As Black');
+  expect(openingInsight('Slav Defense').plan).toContain('As Black');
+});
+
+it('counts decisions the learner can play rather than opponent replies in coverage', () => {
+  const line={id:'white',name:'Test',repertoireColor:'white',moves:['e4','e5','Nf3','Nc6']};
+  const index=buildPositionIndex([line]);
+  const coverage=coverageForLines([line],index,{});
+  expect(coverage.positions).toBe(2);
+  expect(coverage.mastery).toBe(0);
+});
 
 describe('position-aware learning', () => {
   it('recognizes transpositions reached by different move orders', () => {

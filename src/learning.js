@@ -67,9 +67,15 @@ export function positionMastery(stat) {
 }
 
 export function coverageForLines(lines, index, positionStats, now = Date.now()) {
-  const ids = new Set(lines.map(line => line.id));
+  const chosen = new Map(lines.map(line => [line.id,line]));
   const keys = [];
-  for (const [key, node] of index) if ([...node.lineIds].some(id => ids.has(id))) keys.push(key);
+  for (const [key, node] of index) {
+    const trainable = [...node.lineIds].some(id => {
+      const line = chosen.get(id);
+      return line && (positionStats[key]?.attempts || node.turn === (line.repertoireColor === 'black' ? 'b' : 'w'));
+    });
+    if (trainable) keys.push(key);
+  }
   const practiced = keys.filter(key => positionStats[key]?.attempts).length;
   const due = dueReviewKeys(positionStats, keys, now).length;
   const mastery = keys.length ? Math.round(keys.reduce((sum, key) => sum + positionMastery(positionStats[key]), 0) / keys.length) : 0;
@@ -110,12 +116,23 @@ export function linesToPgn(lines) {
 }
 
 export function openingInsight(name = '') {
-  const value = name.toLowerCase();
-  if (value.includes('sicilian')) return { plan:'Fight for the center asymmetrically and develop with tempo.', break:'Typical breaks: …d5 or …b5 for Black; f4–f5 for White.', watch:'Watch the c- and d-files and opposite-wing attacks.' };
-  if (value.includes('queen\'s gambit') || value.includes('slav')) return { plan:'Build central pressure, finish development, then target the queenside.', break:'Typical breaks: e4 for White; …c5 or …e5 for Black.', watch:'Do not rush to win or hold the c4 pawn at the cost of development.' };
-  if (value.includes('king\'s indian')) return { plan:'Accept less queenside space in exchange for a kingside initiative.', break:'Typical breaks: …e5, …c5, and often …f5.', watch:'Timing matters: counterattack before White consolidates.' };
-  if (value.includes('french')) return { plan:'Attack the base of White’s pawn chain and activate the light bishop.', break:'Typical breaks: …c5 and …f6.', watch:'Avoid leaving the c8 bishop without a route into the game.' };
-  if (value.includes('caro-kann')) return { plan:'Challenge the center while preserving a sound pawn structure.', break:'Typical breaks: …c5 and sometimes …e5.', watch:'Develop the light bishop before closing it in with …e6.' };
-  if (value.includes('italian') || value.includes('ruy lopez')) return { plan:'Develop smoothly, castle, and prepare a central d4 break.', break:'Typical break: d4, often supported by c3.', watch:'Improve pieces before launching tactics against the king.' };
+  const value = name.toLowerCase().replace(/’/g,"'");
+  if (value.includes("king's indian attack")) return { plan:'As White, fianchetto the king bishop, castle, and build toward e4 with Nf3, g3, Bg2, and d3.', break:'e4–e5 can gain space once the center is supported; c4 may challenge Black’s d5 setup.', watch:'The same setup meets several Black defenses. Respond to the center instead of playing the setup automatically.' };
+  if (value.includes("king's indian defense")) return { plan:'As Black, fianchetto on g7, castle, and challenge White’s large pawn center.', break:'Prepare …e5 or …c5; in closed centers, …f5 can drive kingside play.', watch:'White has more space. Do not postpone central counterplay indefinitely.' };
+  if (value.includes('sicilian')) return { plan:'As Black, exchange a flank c-pawn for White’s central d-pawn and use the open c-file.', break:'The …d5 break can free Black’s position when prepared; …b5 may gain queenside space.', watch:'White can attack the king. Finish development before chasing side pawns.' };
+  if (value.includes('slav')) return { plan:'As Black, support d5 with …c6 while leaving the c8 bishop a route outside the pawn chain.', break:'Challenge White’s center with …c5 or, in some structures, …e5.', watch:'If you play …e6 too soon, plan how to develop the light-squared bishop.' };
+  if (value.includes("queen's gambit")) return { plan:'As White, pressure d5 with c4, develop, and build enough support for e4.', break:'e4 is a key central expansion; Black often counters with …c5.', watch:'The c4 pawn is less important than development and central control.' };
+  if (value.includes('french')) return { plan:'As Black, support …d5 with …e6, then attack the base of White’s pawn chain.', break:'…c5 pressures d4; …f6 can challenge an advanced e5 pawn later.', watch:'Make a route for the c8 bishop trapped behind the e6 pawn.' };
+  if (value.includes('caro-kann')) return { plan:'As Black, prepare …d5 with …c6 and develop the c8 bishop before …e6 when possible.', break:'…c5 challenges White’s d4 pawn after development.', watch:'A solid pawn chain does not replace piece development.' };
+  if (value.includes('italian')) return { plan:'As White, develop Nf3 and Bc4, castle, and add c3 before opening the center.', break:'Prepare d4 with c3 and active pieces.', watch:'Bishop pressure on f7 needs supporting pieces before a sacrifice.' };
+  if (value.includes('ruy lopez')) return { plan:'As White, Bb5 pressures the knight defending e5. Castle, use Re1 and c3, then expand.', break:'d4 challenges Black’s center after e4 is secure.', watch:'Bb5 does not win e5 immediately; keep the bishop active through Black’s …a6 and …b5.' };
+  if (value.includes('london')) return { plan:'As White, develop Bf4 before e3, support d4, and castle while watching Black’s setup.', break:'Choose c4 or e4 when your pieces support it; Black often challenges with …c5.', watch:'A familiar setup is not a substitute for meeting threats to d4.' };
+  if (value.includes('english')) return { plan:'As White, c4 controls d5 from the flank. Keep the central pawn structure flexible while developing.', break:'d4 or e4 may establish a larger center once Black’s setup is clear.', watch:'The opening often transposes. Judge the pawn structure, not just the move order.' };
+  if (value.includes('dutch')) return { plan:'As Black, …f5 contests e4 and aims for active kingside play.', break:'…e5 is a thematic central strike when it is supported.', watch:'Moving the f-pawn weakens squares around the king; develop and castle with care.' };
+  if (value.includes('pirc')) return { plan:'As Black, let White build a center, then pressure it with …Nf6, …g6, and …Bg7.', break:'Prepare …e5 or …c5 against White’s d4–e4 center.', watch:'White has extra space and attacking options. Complete development before the counterattack.' };
+  if (value.includes('scandinavian')) return { plan:'As Black, challenge e4 immediately with …d5, recapture, and develop while protecting the queen.', break:'…e5 or …c5 can contest White’s center once Black’s pieces are ready.', watch:'Avoid repeated queen moves that give White free developing tempi.' };
+  if (value.includes('vienna')) return { plan:'As White, develop Nc3 before Nf3 to keep the f-pawn free for some attacking setups.', break:'f4 can challenge e5; d4 is another central option when prepared.', watch:'If you play f4 early, watch the exposed king and tactical replies.' };
+  if (value.includes('scotch')) return { plan:'As White, use an early d4 to open the center and develop pieces to active squares.', break:'d4 challenges e5 at once, so coordinate recaptures before seeking an attack.', watch:'An open center rewards development; avoid spending time chasing pawns.' };
+  if (value.includes('four knights')) return { plan:'Develop both knights naturally, then choose a central plan based on Black’s reply.', break:'d4 can challenge e5 after the pieces are ready.', watch:'A symmetrical setup can change quickly; notice pins and central tactics.' };
   return { plan:'Complete development, secure the king, and improve the least-active piece.', break:'Look for the thematic central pawn break created by this structure.', watch:'Memorize the purpose of each move, not only the sequence.' };
 }

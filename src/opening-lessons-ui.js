@@ -6,7 +6,7 @@ export function lessonCatalogView(state, appShell, esc) {
   const done = OPENING_LESSONS.filter(lesson => state.lessonCompleted[lesson.id]).length;
   const visible = OPENING_LESSONS.filter(lesson => state.lessonFilter === 'all' || lesson.color === state.lessonFilter);
   return appShell(`<main class="page lessons-page">
-    <section class="lesson-hero"><div><p class="eyebrow">GUIDED OPENING LESSONS</p><h1>Learn the idea.<br><em>Remember the move.</em></h1><p>Walk through a real opening position, see why each move matters, then answer two recall questions before drilling the line.</p></div><div class="lesson-hero-progress"><strong>${done}/${OPENING_LESSONS.length}</strong><span>lessons learned</span><div class="progress-track"><i style="width:${done / OPENING_LESSONS.length * 100}%"></i></div><small>Progress is saved on this device.</small></div></section>
+    <section class="lesson-hero"><div><p class="eyebrow">GUIDED OPENING LESSONS</p><h1>Learn the idea.<br><em>Remember the move.</em></h1><p>Walk through a real opening position, see why each move matters, then answer two recall questions before drilling the line.</p></div><div class="lesson-hero-progress"><strong>${done}/${OPENING_LESSONS.length}</strong><span>lessons completed</span><div class="progress-track"><i style="width:${done / OPENING_LESSONS.length * 100}%"></i></div><small>Progress is saved on this device.</small></div></section>
     <details class="opening-secondary lesson-principles-details"><summary>Opening basics: four useful principles</summary><section class="lesson-principles" aria-label="Opening fundamentals">
       <article><span>01</span><h2>Claim the center</h2><p>Control central squares with pawns and pieces. This gives your pieces room to work.</p></article>
       <article><span>02</span><h2>Develop with purpose</h2><p>Bring out knights and bishops while noticing what your opponent threatens.</p></article>
@@ -16,7 +16,7 @@ export function lessonCatalogView(state, appShell, esc) {
     <section class="lesson-catalog"><div class="section-heading"><div><p class="eyebrow">CHOOSE A STARTING POINT</p><h2>Opening paths</h2></div><p>Each lesson follows one illustrative line; opponents can choose other moves.</p></div>
       <div class="lesson-filters" role="group" aria-label="Filter lessons by side">${[['all','All lessons'],['white','Play as White'],['black','Play as Black']].map(([value,label])=>`<button class="${state.lessonFilter===value?'active':''}" data-action="lesson-filter" data-id="${value}" aria-pressed="${state.lessonFilter===value}">${label}</button>`).join('')}</div>
       <div class="lesson-grid">${visible.map(lesson=>`<article class="lesson-card">
-        <div class="lesson-card-meta"><span class="color-dot ${lesson.color}">${lesson.color==='white'?'W':'B'}</span><span>${esc(lesson.level)} · ${esc(lesson.color)} side</span><span class="lesson-done">${state.lessonCompleted[lesson.id]?'✓ Learned':'~ 5 min'}</span></div>
+        <div class="lesson-card-meta"><span class="color-dot ${lesson.color}">${lesson.color==='white'?'W':'B'}</span><span>${esc(lesson.level)} · ${esc(lesson.color)} side</span><span class="lesson-done">${state.lessonCompleted[lesson.id]?'✓ Completed':'~ 5 min'}</span></div>
         <h3>${esc(lesson.name)}</h3><p>${esc(lesson.tagline)}</p><div class="lesson-card-foot"><span>${lesson.moves.length} guided moves · 2 recall checks</span><button data-action="open-lesson" data-id="${lesson.id}">${state.lessonCompleted[lesson.id]?'Review lesson':'Start lesson'} →</button></div>
       </article>`).join('')}</div>
     </section>
@@ -47,19 +47,21 @@ export function lessonDetailView(state, appShell, boardHtml, esc) {
       <div class="lesson-feedback ${session.answered?'correct':session.feedback?'retry':''}" role="status" aria-live="polite">${esc(session.feedback || 'Choose a move that serves the plan. The board shows the position before your decision.')}</div>
       ${session.answered?`<button class="primary" data-action="lesson-quiz-next">${session.quiz===lesson.quizzes.length-1?'Finish lesson →':'Next question →'}</button>`:''}
     </div>` : `<div class="lesson-step lesson-finish">
-      <span class="lesson-finish-icon">✓</span><p class="eyebrow">PLAN → RECALL → PRACTICE</p><h2>You know the idea.</h2><p>You found the key moves in this ${esc(lesson.name)} setup. Now practice the same opening against the repertoire and learn how it changes when the opponent chooses another line.</p>
+      <span class="lesson-finish-icon">✓</span><p class="eyebrow">PLAN → RECALL → PRACTICE</p><h2>${session.firstTry===lesson.quizzes.length?'Both ideas recalled.':'Keep the plan in mind.'}</h2><p>${session.firstTry}/${lesson.quizzes.length} key moves found on your first try. ${session.missed.length?'Replay the missed decision, then drill the line to make it stick.':'Now practice against repertoire replies and notice when the position changes.'}</p>
       <div class="lesson-step-actions"><button class="primary" data-action="lesson-drill">Drill this line →</button><button class="secondary" data-action="lesson-browse">Explore variations</button></div>
       <button class="text-button" data-action="lesson-restart">Replay lesson from the start</button>
     </div>`;
   return appShell(`<main class="page lesson-detail">
     <div class="lesson-top"><button class="back" data-action="lessons">← All lessons</button><span class="eyebrow">${esc(lesson.level.toUpperCase())} · ${lesson.color.toUpperCase()} REPERTOIRE</span></div>
-    <div class="lesson-title"><div><p class="eyebrow">OPENING FIELD GUIDE</p><h1>${esc(lesson.name)}</h1><p>${esc(lesson.tagline)}</p></div><span>${session.mode==='study'?`${step}/${lesson.moves.length} moves`:session.mode==='quiz'?`${session.quiz+1}/${lesson.quizzes.length} questions`:'✓ Learned'}</span></div>
+    <div class="lesson-title"><div><p class="eyebrow">OPENING FIELD GUIDE</p><h1>${esc(lesson.name)}</h1><p>${esc(lesson.tagline)}</p></div><span>${session.mode==='study'?`${step}/${lesson.moves.length} moves`:session.mode==='quiz'?`${session.quiz+1}/${lesson.quizzes.length} questions`:`${session.firstTry}/${lesson.quizzes.length} first try`}</span></div>
     <div class="lesson-layout"><div class="lesson-board-column">${boardHtml(chess,lesson.color)}<p class="lesson-board-caption">${esc(boardCaption)} · Board viewed from ${lesson.color}'s side</p></div>
       <div class="lesson-guide">${detail}${session.mode==='quiz'?'<div class="lesson-plan lesson-memory-note"><p class="eyebrow">RECALL FIRST</p><p>Picture the plan before looking back at the annotated line. If you miss, you’ll get a hint.</p></div>':`<div class="lesson-plan"><p class="eyebrow">KEEP THE IDEAS IN MIND</p><dl><dt>Plan</dt><dd>${esc(lesson.plan)}</dd><dt>Pawn break</dt><dd>${esc(lesson.break)}</dd><dt>Watch for</dt><dd>${esc(lesson.watch)}</dd></dl></div>`}</div>
     </div>
     ${study?`<section class="lesson-sequence"><div class="section-heading"><div><p class="eyebrow">FOLLOW THE LINE</p><h2>Move by move</h2></div><p>Select any move to revisit its reason.</p></div><div class="lesson-moves"><button data-action="lesson-step" data-id="0" class="${step===0?'active':''}">Start</button>${lesson.moves.map(([san],index)=>`<button data-action="lesson-step" data-id="${index+1}" class="${step===index+1?'active':''}">${esc(moveLabel(index,san))}</button>`).join('')}</div><p>This is one instructive continuation, not a forced sequence. Use the plan when your opponent deviates.</p></section>`:''}
   </main>`);
 }
+
+const newLessonSession = id => ({ id, mode:'study', step:0, quiz:0, answered:false, feedback:'', firstTry:0, missed:[] });
 
 export function handleLessonAction(element, { state, render, save, startSession, openings }) {
   const { action, id } = element.dataset;
@@ -75,7 +77,7 @@ export function handleLessonAction(element, { state, render, save, startSession,
     if (['all','white','black'].includes(id)) state.lessonFilter = id;
   } else if (action === 'open-lesson') {
     if (!OPENING_LESSONS.some(lesson => lesson.id === id)) return true;
-    state.lesson = { id, mode:'study', step:0, quiz:0, answered:false, feedback:'' };
+    state.lesson = newLessonSession(id);
     state.screen = 'lesson';
     state.session = null;
     state.challenge = null;
@@ -98,7 +100,11 @@ export function handleLessonAction(element, { state, render, save, startSession,
       if (id === lesson.moves[question.at][0]) {
         session.answered = true;
         session.feedback = question.explanation;
-      } else session.feedback = `Not quite. ${question.hint} Try another move.`;
+        if (!session.missed.includes(session.quiz)) session.firstTry++;
+      } else {
+        if (!session.missed.includes(session.quiz)) session.missed.push(session.quiz);
+        session.feedback = `Not quite. ${question.hint} Try another move.`;
+      }
     } else if (action === 'lesson-quiz-next' && session.mode === 'quiz' && session.answered) {
       if (session.quiz + 1 < lesson.quizzes.length) {
         session.quiz += 1; session.answered = false; session.feedback = '';
@@ -108,7 +114,7 @@ export function handleLessonAction(element, { state, render, save, startSession,
         save();
       }
     } else if (action === 'lesson-restart') {
-      state.lesson = { id:lesson.id, mode:'study', step:0, quiz:0, answered:false, feedback:'' };
+      state.lesson = newLessonSession(lesson.id);
       window.scrollTo(0, 0);
     } else if (action === 'lesson-drill') {
       const line = matchingLessonLine(lesson, openings());

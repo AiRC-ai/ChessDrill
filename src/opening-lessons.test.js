@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { OPENINGS } from './openings.js';
-import { OPENING_LESSONS, lessonPosition, matchingLessonLine } from './opening-lessons.js';
+import { OPENING_LESSONS, lessonPosition, matchingLessonLine, openingLessonReason } from './opening-lessons.js';
 import { handleLessonAction } from './opening-lessons-ui.js';
 
 describe('guided opening lessons', () => {
@@ -27,6 +27,7 @@ describe('guided opening lessons', () => {
       expect(line, lesson.name).not.toBeNull();
       expect(line.repertoireColor).toBe(lesson.color);
       expect(line.moves.slice(0, lesson.moves.length)).toEqual(lesson.moves.map(([san]) => san));
+      expect(openingLessonReason(line,lesson.quizzes[0].at)).toBe(lesson.moves[lesson.quizzes[0].at][1]);
     }
   });
 
@@ -52,6 +53,7 @@ describe('guided opening lessons', () => {
       act('lesson-answer','c3');
       act('lesson-quiz-next');
       expect(state.lesson.mode).toBe('done');
+      expect(state.lesson.firstTry).toBe(1);
       expect(state.lessonCompleted.italian).toBeGreaterThan(0);
       expect(save).toHaveBeenCalled();
       act('lesson-drill');

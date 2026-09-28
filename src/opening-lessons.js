@@ -224,3 +224,9 @@ export function matchingLessonLine(lesson, openings) {
     .sort((a, b) => a.moves.length - b.moves.length)[0];
   return line ? { ...line, openingId:opening.id, openingName:opening.name, repertoireColor:opening.color } : null;
 }
+
+export function openingLessonReason(line, ply) {
+  const lesson = OPENING_LESSONS.find(item => item.openingId === line.openingId &&
+    item.moves.slice(0, ply + 1).every(([san], index) => line.moves[index] === san));
+  return lesson?.moves[ply]?.[1] || null;
+}
