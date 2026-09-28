@@ -187,6 +187,10 @@ async function importStudyFile(file){
 
 function studyOpening(name){cancelAnalysisWork();cancelReviewEngine();const normalized=s=>s.toLowerCase().replace(/[’']/g,'').replace(/\b([a-z]{3,})s\b/g,'$1').replace(/[^a-z0-9]/g,'');const target=normalized(name);const opening=workingOpenings().filter(o=>target.includes(normalized(o.name))||normalized(o.name).includes(target)).sort((a,b)=>b.name.length-a.name.length)[0];state.screen='library';state.level='advanced';state.query=opening?.name||'';if(opening){state.expanded.add(opening.id);const main=opening.lines.find(l=>l.name==='Main line')||opening.lines[0];if(main)state.selected.add(main.id);}save();render();}
 function render(){
+  const active=document.activeElement;
+  const focusKey=active?.id?'id':['line','square','role','action'].find(key=>active?.dataset?.[key]);
+  const focusValue=focusKey==='id'?active.id:focusKey?active.dataset[focusKey]:null;
+  const focusId=active?.dataset?.id;
   const selected=availableDrillLines();
   const due=dueReviewKeys(state.positionStats,selectedPositionKeys()).length;
   let view;
@@ -205,7 +209,8 @@ function render(){
     case 'lesson': view=lessonDetailView(state,appShell,boardHtml,esc);break;
     default: view=libraryView();
   }
-  document.querySelector('#app').innerHTML=view;
+  const app=document.querySelector('#app');app.innerHTML=view;
+  if(focusKey){const candidates=focusKey==='id'?[document.getElementById(focusValue)]:[...app.querySelectorAll(`[data-${focusKey}]`)];const target=candidates.find(el=>el&&(focusKey==='id'||el.dataset[focusKey]===focusValue)&&(focusKey!=='action'||el.dataset.id===focusId));if(target&&!target.disabled)target.focus({preventScroll:true});}
 }
 connectAnalysis({render,studyOpening,navigate:screen=>{if(screen!=='analysis')cancelAnalysisWork();state.screen=screen;render();}});connectReview({render,studyOpening,navigate:screen=>{cancelAnalysisWork();state.screen=screen;render();}});document.addEventListener('click',handleClick);document.addEventListener('change',handleChange);document.addEventListener('input',handleChange);document.addEventListener('submit',e=>{if(e.target.id==='analysis-form')void submitAnalysis(e);if(e.target.id==='review-pgn-form')submitReviewPgn(e);});document.addEventListener('visibilitychange',()=>{const s=state.session;if(!s||s.complete)return;if(document.hidden)s.hiddenAt=Date.now();else if(s.hiddenAt){s.promptStartedAt+=Date.now()-s.hiddenAt;s.hiddenAt=null;updateDrillClock();}});setInterval(updateDrillClock,250);render();
 document.addEventListener('click',e=>{
