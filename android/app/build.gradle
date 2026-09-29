@@ -4,14 +4,15 @@ plugins {
 
 android {
     namespace 'com.leglerisaac.chessstudio'
-    compileSdk 35
+    compileSdk 36
 
     defaultConfig {
         applicationId 'com.leglerisaac.chessstudio'
         minSdk 26
-        targetSdk 35
-        versionCode 4
-        versionName '0.4.0'
+        targetSdk 36
+        // CI supplies a unique code for every Play upload; local builds keep their stable version.
+        versionCode (System.getenv('PLAY_VERSION_CODE') ?: '4').toInteger()
+        versionName (System.getenv('PLAY_VERSION_NAME') ?: project.findProperty('appVersionName'))
     }
 
     compileOptions {

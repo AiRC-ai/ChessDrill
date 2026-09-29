@@ -3,6 +3,8 @@ dist/
 public/stockfish/
 .codex/
 .DS_Store
+__pycache__/
+*.pyc
 android/.gradle/
 android/.idea/
 android/local.properties

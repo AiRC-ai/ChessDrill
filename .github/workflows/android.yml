@@ -17,7 +17,7 @@ permissions:
   contents: read
 
 jobs:
-  apk:
+  build:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -29,23 +29,119 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run test:analysis
+      - name: Test Play publishing logic
+        run: python3 -m unittest discover -s scripts -p test_publish_play.py
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-      - name: Install Android SDK 35
+      - name: Install Android SDK 36
         run: |
           SDK_MANAGER="$(find "$ANDROID_HOME/cmdline-tools" -maxdepth 3 -type f -name sdkmanager | head -n 1)"
-          "$SDK_MANAGER" 'platforms;android-35' 'build-tools;35.0.0'
+          "$SDK_MANAGER" 'platforms;android-36' 'build-tools;35.0.0'
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
-      - name: Build APKs with the bundled web app
+      - name: Assign a unique Play version code
+        run: |
+          if (( GITHUB_RUN_ATTEMPT > 9 )); then
+            echo 'Run attempt exceeds the reserved version-code range. Start a new workflow run.' >&2
+            exit 1
+          fi
+          code=$((100000 + GITHUB_RUN_NUMBER * 10 + GITHUB_RUN_ATTEMPT))
+          if (( code >= 2100000000 )); then
+            echo 'The Play version code exceeds the Android limit.' >&2
+            exit 1
+          fi
+          app_version="$(sed -n 's/^appVersionName=//p' android/gradle.properties)"
+          if [[ ! "$app_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo 'Set appVersionName in android/gradle.properties (for example, 0.5.0).' >&2
+            exit 1
+          fi
+          echo "PLAY_VERSION_CODE=$code" >> "$GITHUB_ENV"
+          echo "PLAY_VERSION_NAME=$app_version-ci.$GITHUB_RUN_NUMBER.$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
+      - name: Build APKs and Play App Bundle with the bundled web app
         working-directory: android
-        run: gradle :app:assembleDebug :app:assembleRelease --stacktrace
+        run: gradle :app:assembleDebug :app:assembleRelease :app:bundleRelease --stacktrace
       - uses: actions/upload-artifact@v4
         with:
-          name: chess-studio-android
+          name: chess-studio-apks
           path: |
             android/app/build/outputs/apk/debug/app-debug.apk
             android/app/build/outputs/apk/release/app-release-unsigned.apk
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chess-studio-unsigned-bundle
+          path: android/app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+
+  publish-internal:
+    name: Publish to Play internal testing
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: play-internal
+    concurrency:
+      group: chess-studio-play-internal
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: chess-studio-unsigned-bundle
+          path: android-artifact
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check release credentials
+        env:
+          PLAY_UPLOAD_KEYSTORE_BASE64: ${{ secrets.PLAY_UPLOAD_KEYSTORE_BASE64 }}
+          PLAY_UPLOAD_STORE_PASSWORD: ${{ secrets.PLAY_UPLOAD_STORE_PASSWORD }}
+          PLAY_UPLOAD_KEY_PASSWORD: ${{ secrets.PLAY_UPLOAD_KEY_PASSWORD }}
+          PLAY_UPLOAD_KEY_ALIAS: ${{ secrets.PLAY_UPLOAD_KEY_ALIAS }}
+          PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+        run: |
+          for secret in PLAY_UPLOAD_KEYSTORE_BASE64 PLAY_UPLOAD_STORE_PASSWORD PLAY_UPLOAD_KEY_PASSWORD PLAY_UPLOAD_KEY_ALIAS PLAY_SERVICE_ACCOUNT_JSON; do
+            if [[ -z "${!secret}" ]]; then
+              echo "Missing $secret in the play-internal GitHub environment. See android/README.md." >&2
+              exit 1
+            fi
+          done
+      - name: Sign and verify the exact bundle built by CI
+        env:
+          PLAY_UPLOAD_KEYSTORE_BASE64: ${{ secrets.PLAY_UPLOAD_KEYSTORE_BASE64 }}
+          PLAY_UPLOAD_STORE_PASSWORD: ${{ secrets.PLAY_UPLOAD_STORE_PASSWORD }}
+          PLAY_UPLOAD_KEY_PASSWORD: ${{ secrets.PLAY_UPLOAD_KEY_PASSWORD }}
+          PLAY_UPLOAD_KEY_ALIAS: ${{ secrets.PLAY_UPLOAD_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          store="$RUNNER_TEMP/play-upload.p12"
+          printf '%s' "$PLAY_UPLOAD_KEYSTORE_BASE64" | base64 --decode > "$store"
+          chmod 600 "$store"
+          unsigned=android-artifact/app-release.aab
+          signed="$RUNNER_TEMP/chess-studio-play.aab"
+          test -s "$unsigned"
+          jarsigner -keystore "$store" -storetype PKCS12 \
+            -storepass:env PLAY_UPLOAD_STORE_PASSWORD -keypass:env PLAY_UPLOAD_KEY_PASSWORD \
+            -signedjar "$signed" "$unsigned" "$PLAY_UPLOAD_KEY_ALIAS"
+          jarsigner -verify "$signed"
+          echo "PLAY_SIGNED_BUNDLE=$signed" >> "$GITHUB_ENV"
+          rm -f "$store"
+      - name: Install Play API client
+        run: python -m pip install -r scripts/requirements-play.txt
+      - name: Upload to Play internal testing
+        env:
+          PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+        run: |
+          set -euo pipefail
+          notes="$(git log -1 --pretty=%s | cut -c 1-350)"
+          python scripts/publish_play.py \
+            --bundle "$PLAY_SIGNED_BUNDLE" \
+            --name "Chess Studio $GITHUB_RUN_NUMBER.$GITHUB_RUN_ATTEMPT" \
+            --notes "$notes"
