@@ -42,6 +42,8 @@ jarsigner -verify chess-studio-first.aab
 
 Replace `chessstudio` with your key alias. Keep these values out of shell history and transcripts. The first workflow publish attempt will fail until Play accepts the initial Console upload. A later new run creates a higher version code automatically.
 
+If you previously installed a directly signed APK and let Play generate a different **app signing key**, the Play-distributed app has a different device signature. Export your Progress JSON before uninstalling the old APK, then install the Play build and import the backup. Supplying your existing app signing key during Play App Signing setup preserves the device signature, but gives Google a copy of that private key; choose that setup deliberately.
+
 ## Transfer progress from the website
 
 On the website, go to **Progress → Back up progress**. In the Android app, go to **Progress → Import PGN / backup** and choose that JSON file. These backups include opening selections, custom repertoire, lesson completion, spaced reviews, and saved game puzzle cards. Cached analysis reports and full game reviews are device-specific and are not included in that export; import a PGN or analyze an account again on Android to recreate those reports.
