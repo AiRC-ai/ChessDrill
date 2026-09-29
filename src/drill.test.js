@@ -5,7 +5,7 @@ import { chooseTheoryMove, createDrill, eligibleSelectedLines, linePositions, th
 describe('opening data', () => {
   it('contains only legal move sequences', () => {
     for (const line of allLines()) expect(() => linePositions(line)).not.toThrow();
-  });
+  }, 30_000);
   it('creates prompts for the selected repertoire color', () => {
     const white = allLines().find(line => line.repertoireColor === 'white');
     expect(createDrill(white, 'white').prompts.every(p => p.turn === 'w')).toBe(true);

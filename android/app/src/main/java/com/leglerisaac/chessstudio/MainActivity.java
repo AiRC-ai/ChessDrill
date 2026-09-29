@@ -34,6 +34,12 @@ import java.util.Collections;
 public class MainActivity extends Activity {
     private static final String ORIGIN = "https://appassets.androidplatform.net";
     private static final String HOME = ORIGIN + "/assets/web/index.html";
+    private static final String PRIVACY = ORIGIN + "/assets/web/privacy.html";
+    private static final String CREDITS = ORIGIN + "/assets/web/credits.html";
+    private static final String STOCKFISH_LICENSE = ORIGIN + "/assets/web/stockfish/Copying.txt";
+    private static final String PIECES_LICENSE = ORIGIN + "/assets/web/licenses/GPL-2.0.txt";
+    private static final String CHESSJS_LICENSE = ORIGIN + "/assets/web/licenses/BSD-2-chess.js.txt";
+    private static final String ANDROIDX_LICENSE = ORIGIN + "/assets/web/licenses/Apache-2.0.txt";
     private static final String WASM_PATH = "/assets/web/stockfish/stockfish-19-lite-single.wasm";
     private static final int PICK_FILE = 10;
     private static final int SAVE_FILE = 11;
@@ -90,7 +96,10 @@ public class MainActivity extends Activity {
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 if (!request.isForMainFrame()) return false;
                 Uri uri = request.getUrl();
-                if (HOME.equals(uri.toString())) return false;
+                if (HOME.equals(uri.toString()) || PRIVACY.equals(uri.toString()) ||
+                    CREDITS.equals(uri.toString()) || STOCKFISH_LICENSE.equals(uri.toString()) ||
+                    PIECES_LICENSE.equals(uri.toString()) || CHESSJS_LICENSE.equals(uri.toString()) ||
+                    ANDROIDX_LICENSE.equals(uri.toString())) return false;
                 openExternal(uri);
                 return true;
             }
@@ -171,7 +180,9 @@ public class MainActivity extends Activity {
         String host = uri.getHost();
         if (!"https".equalsIgnoreCase(uri.getScheme()) || host == null ||
             !("chess.com".equalsIgnoreCase(host) || "www.chess.com".equalsIgnoreCase(host) ||
-              "lichess.org".equalsIgnoreCase(host) || "www.lichess.org".equalsIgnoreCase(host))) return;
+              "lichess.org".equalsIgnoreCase(host) || "www.lichess.org".equalsIgnoreCase(host) ||
+              "github.com".equalsIgnoreCase(host) || "docs.github.com".equalsIgnoreCase(host) ||
+              "www.gnu.org".equalsIgnoreCase(host))) return;
         try {
             startActivity(new Intent(Intent.ACTION_VIEW, uri));
         } catch (ActivityNotFoundException error) {
@@ -203,6 +214,14 @@ public class MainActivity extends Activity {
     @Override
     @SuppressWarnings("deprecation")
     public void onBackPressed() {
+        String url = webView.getUrl();
+        if (PRIVACY.equals(url) || CREDITS.equals(url) ||
+            STOCKFISH_LICENSE.equals(url) || PIECES_LICENSE.equals(url) ||
+            CHESSJS_LICENSE.equals(url) || ANDROIDX_LICENSE.equals(url)) {
+            if (webView.canGoBack()) webView.goBack();
+            else webView.loadUrl(HOME);
+            return;
+        }
         webView.evaluateJavascript("window.chessStudioBack ? window.chessStudioBack() : false",
             result -> { if (!"true".equals(result)) finish(); });
     }

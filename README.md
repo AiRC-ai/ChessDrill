@@ -1,6 +1,6 @@
 # Chess Studio
 
-Chess Studio combines [MoveMirror](https://github.com/leglerisaac/movemirror) and [ChessDrill](https://github.com/leglerisaac/ChessDrill) in one free, browser-based learning space. [Open the live site](https://leglerisaac.github.io/ChessDrill/).
+Chess Studio combines [MoveMirror](https://github.com/leglerisaac/movemirror) and [ChessDrill](https://github.com/leglerisaac/ChessDrill) in one free, browser-based learning space. [Open the live site](https://leglerisaac.github.io/ChessDrill/). The [privacy policy](https://leglerisaac.github.io/ChessDrill/privacy.html) and [open-source credits](https://leglerisaac.github.io/ChessDrill/credits.html) use the same free GitHub Pages site and are also bundled in the Android app.
 
 ## Learn from a complete loop
 
@@ -12,11 +12,13 @@ Chess Studio combines [MoveMirror](https://github.com/leglerisaac/movemirror) an
 6. **Build a repertoire:** ChessDrill retains its 124 opening families and 3,755 selectable lines, repertoire roles, hints, animated board, named plans, PGN import/export, and position-based spaced repetition. Jump from a recurring opening in the game report to its matching repertoire family.
 7. **Test your recall:** Theory Challenge chooses a random side and varied documented replies, recognizing transpositions. The Progress screen shows due reviews, guided lessons, and coverage, with JSON backup and restore for your repertoire, lesson completion, and personal game puzzles.
 
-The dashboard brings analysis findings, selected lines, due positions, and opening progress together. No account is required. Browser storage holds reports, up to eight recent sample PGNs, three engine game reviews, and at most 120 personal practice positions on the current device. Clearing this site's browser data removes them. The Progress JSON backup covers repertoire and game puzzles; annotated PGN exports cover an individual game review. Imported backups are validated before replacing study data. Engine evaluations at depth 8–12 are estimates and close classifications can change on a deeper pass.
+The dashboard brings analysis findings, selected lines, due positions, and opening progress together. No account is required. Browser storage holds reports, up to eight recent sample PGNs, three engine game reviews, and at most 120 personal practice positions on the current device. Progress → Import, export, and reset → Delete all local data removes these saved study keys, or you can clear the site's browser data. The Progress JSON backup covers repertoire and game puzzles; annotated PGN exports cover an individual game review. Imported backups are validated before replacing study data. Engine evaluations at depth 8–12 are estimates and close classifications can change on a deeper pass.
 
 ## Android app
 
 The `android/` project packages Chess Studio and its local Stockfish engine as an installable Android app. The lessons, drills, puzzle deck, and PGN review work offline; public-account analysis needs a connection. The Android build workflow produces APKs and an App Bundle, then publishes successful builds to Play's internal testing track once the one-time credentials are configured. [Android build, Play setup, and transfer instructions](android/README.md) explain the release setup and how to move a Progress JSON backup from the website into the app. Website and app storage are separate.
+
+The [Play submission sheet](docs/PLAY_SUBMISSION.md) contains the privacy URL, code-based Data safety starting answers, listing copy, and remaining Console steps.
 
 ## Local development
 
@@ -48,5 +50,6 @@ This is the free static learning site. MoveMirror's separate Cloudflare Worker, 
 - Opening records are generated from [lichess-org/chess-openings](https://github.com/lichess-org/chess-openings) (CC0); `src/openings.js` contains the bundled catalog.
 - `src/movemirror/` contains adapted analysis, public API adapters, report planning, and engine insight modules from the owner's MoveMirror project.
 - Stockfish 19 Lite runs locally under GPLv3; its `Copying.txt` ships next to the engine assets.
+- Cburnett pieces by Colin M. L. Burnett are attributed according to Lichess's GPLv2+ listing, with a bundled GPLv2 license text. chess.js (BSD 2-Clause) and AndroidX WebKit (Apache 2.0) notices are bundled and linked in the app.
 - Game data comes from the public Chess.com and Lichess APIs. Chess Studio is independent and is not endorsed by either platform.
 - Chess.com API responses use direct requests when available. The JSONP fallback runs inside an isolated, opaque-origin iframe so third-party scripts cannot read the app's saved study data or Android bridge.

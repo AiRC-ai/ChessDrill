@@ -50,6 +50,8 @@ On the website, go to **Progress → Back up progress**. In the Android app, go 
 
 The native file picker imports PGN and JSON files. Exports open Android's **Save to…** picker. External chess links open in the device's browser. Android's Back button exits the current study, review, or page before closing the app.
 
+The app footer opens the bundled **Privacy policy** and **Open-source credits** pages without needing an internet connection. Back returns to the study screen. Progress → Import, export, and reset → **Delete all local data** erases this app's saved openings, progress, cached account reports, games, full reviews, and puzzles. The public Play privacy URL is `https://leglerisaac.github.io/ChessDrill/privacy.html`; the [Play submission sheet](../docs/PLAY_SUBMISSION.md) lists the Console declarations that accompany this build.
+
 ## Source and licenses
 
 The web application remains the single source of truth for both platforms. The bundled Stockfish code and its GPLv3 `Copying.txt` are placed in `assets/web/stockfish/` by the web build. The Android source code and dependency declarations are in this folder.

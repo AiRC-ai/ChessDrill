@@ -339,3 +339,8 @@ input[type=range]{width:100%;accent-color:var(--green);margin-top:15px}
 .drill-teaching{background:#edf5e9;border:1px solid #d9e8d2;border-radius:11px;padding:15px 17px;margin:14px 0 18px;color:#315b3d}
 .drill-teaching b{font:22px Georgia,serif}.drill-teaching p{font-size:13px;line-height:1.6;margin:7px 0 0;color:#4b6451}
 @media(max-width:760px){.opening-plan{grid-template-columns:1fr;gap:10px}.opening-plan .text-button{grid-column:1}.library-selection-note{margin-top:4px}}
+
+.site-footer{display:flex;align-items:center;justify-content:space-between;gap:12px 30px;flex-wrap:wrap;max-width:1220px;margin:0 auto;padding:20px 24px 36px;border-top:1px solid #d9e2d9;color:#6c7e72;font-size:12px}
+.site-footer>span:last-child{display:flex;gap:21px;flex-wrap:wrap}.site-footer a{color:#285e45;font-weight:700;text-underline-offset:3px}.site-footer a:focus-visible{outline:2px solid #285e45;outline-offset:3px}
+.data-control{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:17px 0 4px;border-top:1px solid #e0e7df}.data-control b{color:#374d3d;font-size:13px}.progress-tools .data-control p{margin:4px 0 0;line-height:1.5}.data-control button{white-space:nowrap}
+@media(max-width:760px){.site-footer{padding:20px 16px 30px}.data-control{align-items:flex-start;flex-direction:column}.data-control button{white-space:normal}}

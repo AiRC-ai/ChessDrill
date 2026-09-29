@@ -10,6 +10,7 @@ import { lessonCatalogView, lessonDetailView, handleLessonAction } from './openi
 import { cancelReviewEngine, connectReview, dueMistakeCount, exportMistakeDeck, gameReviewView, handleReviewAction, handleReviewInput, handleReviewSquare, mistakeDeckSummary, reviewPracticeView, restoreMistakeDeck, submitReviewPgn } from './review.js';
 import { saveTextFile } from './native-export.js';
 import { validateBackup } from './backup.js';
+import { deleteLocalStudyData } from './privacy.js';
 import { clockExpired, remainingSeconds } from './drill-clock.js';
 import { explainBestMove } from './movemirror/explain-move.js';
 import './styles.css';
@@ -47,7 +48,7 @@ function appShell(content){
     ['library','lessons','lesson'].includes(state.screen)?'home':
     ['practice','drill','review-practice','challenge-setup','challenge-play'].includes(state.screen)?'practice':'progress';
   const links=[['dashboard','Home','⌂'],['analyze','Games','♟'],['home','Openings','▦'],['practice','Practice','↗'],['progress','Progress','◷']];
-  return `<header class="topbar"><button class="brand" data-action="dashboard" aria-label="Chess Studio home"><span class="brand-mark"><img src="${import.meta.env.BASE_URL}chess-studio-icon.svg" alt=""></span><span>Chess<span>Studio</span></span></button><nav aria-label="Main navigation">${links.map(([action,label,icon])=>`<button class="nav-link ${active===action?'active':''}" data-action="${action}" ${active===action?'aria-current="page"':''}><span class="nav-icon" aria-hidden="true">${icon}</span><span>${label}</span></button>`).join('')}</nav></header>${state.storageNotice?`<p class="storage-warning" role="alert">${esc(state.storageNotice)}</p>`:''}${content}`;
+  return `<header class="topbar"><button class="brand" data-action="dashboard" aria-label="Chess Studio home"><span class="brand-mark"><img src="${import.meta.env.BASE_URL}chess-studio-icon.svg" alt=""></span><span>Chess<span>Studio</span></span></button><nav aria-label="Main navigation">${links.map(([action,label,icon])=>`<button class="nav-link ${active===action?'active':''}" data-action="${action}" ${active===action?'aria-current="page"':''}><span class="nav-icon" aria-hidden="true">${icon}</span><span>${label}</span></button>`).join('')}</nav></header>${state.storageNotice?`<p class="storage-warning" role="alert">${esc(state.storageNotice)}</p>`:''}${content}<footer class="site-footer"><span>Chess Studio · Independent chess study</span><span><a href="${import.meta.env.BASE_URL}privacy.html">Privacy policy</a><a href="${import.meta.env.BASE_URL}credits.html">Open-source credits</a></span></footer>`;
 }
 
 function recommendationsView(){return `<section class="recommended"><div class="section-heading"><div><p class="eyebrow">RECOMMENDED OPENINGS</p><h2>A strong place to start</h2></div><p>Balanced, practical repertoires</p></div><div class="recommendation-grid">${RECOMMENDATIONS.map(([name,reason])=>{const o=workingOpenings().find(x=>x.name===name),v=o&&(openingForLevel(o)||o);if(!v)return'';const added=v.lines.every(l=>state.selected.has(l.id));return `<article><span class="color-dot ${o.color}">${o.color==='white'?'W':'B'}</span><div><b>${esc(name)}</b><p>${esc(reason)}</p><small>${v.lines.length} foundational lines</small></div><button class="${added?'added':''}" data-action="recommend" data-id="${o.id}">${added?'✓ Added':'+ Add'}</button></article>`;}).join('')}</div></section>`;}
@@ -140,6 +141,13 @@ function handleClick(e){
   if(action==='export-pgn')download('chessdrill-repertoire.pgn',linesToPgn(workingLines().filter(l=>state.selected.has(l.id))),'application/x-chess-pgn');
   if(action==='export-data')download('chessdrill-backup.json',JSON.stringify({...backupData(),reviewCards:exportMistakeDeck()},null,2),'application/json');
   if(action==='reset-stats'&&confirm('Reset all ChessDrill progress?')){state.stats={};state.positionStats={};save();}
+  if(action==='delete-local-data'){
+    if(!confirm('Delete all Chess Studio study data on this device? This includes openings, progress, account analysis, cached games, reviews, and puzzles. Exports saved elsewhere are unaffected. This cannot be undone.'))return;
+    cancelAnalysisWork();cancelReviewEngine();
+    try{deleteLocalStudyData(localStorage);location.reload();}
+    catch{state.importNotice='Could not delete local data. Try clearing Chess Studio storage in your device or browser settings.';}
+    return;
+  }
   render();
 }
 function handleChange(e){
@@ -276,7 +284,7 @@ function progressView(){
   return appShell(`<main class="page progress-page"><p class="eyebrow">YOUR STUDY RECORD</p><h1>Progress</h1>
     <section class="stat-grid"><div><span>${coverage.practiced}/${coverage.positions}</span><small>opening positions seen</small></div><div><span>${due}</span><small>opening positions due</small></div><div><span>${coverage.mastery}%</span><small>estimated mastery</small></div></section>
     <div class="progress-summary"><span>${learned}/${OPENING_LESSONS.length} lessons completed</span><span>${deck.total} game positions saved · ${deck.due} due</span><button class="text-button" data-action="practice">Go to practice →</button></div>
-    <details class="opening-secondary progress-tools" ${state.progressImportOpen?'open':''}><summary>Import, export, and reset</summary><div class="progress-actions"><button class="secondary" data-action="export-pgn">Export selected PGN</button><button class="secondary" data-action="export-data">Back up progress</button><label class="secondary file-button">Import PGN / backup<input id="import-file" type="file" accept=".pgn,.json,text/plain"></label><button class="secondary" data-action="reset-stats">Reset practice stats</button></div><p>Your backup includes selected lines, lessons, opening reviews, and game puzzles.</p>${state.importNotice?`<p class="import-notice" role="status">${esc(state.importNotice)}</p>`:''}</details>
+    <details class="opening-secondary progress-tools" ${state.progressImportOpen?'open':''}><summary>Import, export, and reset</summary><div class="progress-actions"><button class="secondary" data-action="export-pgn">Export selected PGN</button><button class="secondary" data-action="export-data">Back up progress</button><label class="secondary file-button">Import PGN / backup<input id="import-file" type="file" accept=".pgn,.json,text/plain"></label><button class="secondary" data-action="reset-stats">Reset practice stats</button></div><p>Your backup includes selected lines, lessons, opening reviews, and game puzzles. Cached account reports and full game reviews are not included.</p><div class="data-control"><div><b>Delete local study data</b><p>Removes openings, progress, account reports, cached games, reviews, and puzzles from this device. Save anything you need first.</p></div><button class="secondary" data-action="delete-local-data">Delete all local data</button></div>${state.importNotice?`<p class="import-notice" role="status">${esc(state.importNotice)}</p>`:''}</details>
     <section class="progress-list"><div class="section-heading"><h2>Repertoire coverage</h2><button class="text-button" data-action="home">Choose openings →</button></div>${families.length?families.map(({o,lines,c})=>`<div class="coverage-row"><span><b>${esc(o.name)}</b><small>${lines.length} selected lines · ${c.practiced}/${c.positions} positions seen · ${c.due} due</small></span><div class="mastery"><i style="width:${c.mastery}%"></i></div><strong>${c.mastery}%</strong></div>`).join(''):'<div class="empty"><h3>No repertoire selected yet</h3><p>Choose an opening to start building your coverage map.</p><button class="primary" data-action="home">Choose openings →</button></div>'}</section>
   </main>`);
 }
