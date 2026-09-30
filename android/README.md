@@ -8,15 +8,15 @@ Install Android Studio with Android SDK 36 and JDK 17, plus Node.js 22. From the
 
 The Android package is `com.leglord.chessstudio`. CI produces an unsigned release APK and a debug APK for verification. Sign release APKs with the same private signing key for all updates; never commit that key or password to the repository. Debug APKs have a different signature and cannot update an installed release build. The earlier `com.leglerisaac.chessstudio` APK is a separate Android app; export its Progress JSON before uninstalling it, then import that backup in the new app.
 
-## Automatic Google Play internal releases
+## Automatic Google Play closed-test releases
 
-Each successful `main` build of the Android workflow signs the exact App Bundle produced by its test/build job and uploads it to the **internal testing** track. A manual **Run workflow** on `main` does the same. This does not publish to production. The version code is generated from the GitHub workflow run number and attempt; change `appVersionName` in `android/gradle.properties` when you want a new visible version. Avoid rerunning an older workflow after a newer version has reached Play, since Play rejects older version codes. CI permits up to nine attempts of the same run; start a new run after that.
+Each successful `main` build of the Android workflow signs the exact App Bundle produced by its test/build job and submits it to the existing **closed testing** track. A manual **Run workflow** on `main` does the same. The publisher reads Play's tracks and refuses to update production, open testing, internal testing, or a closed track with no active release. If exactly one active closed track exists, it is selected automatically; if there are several, set the `PLAY_CLOSED_TRACK` environment variable to the exact track name. The version code is generated from the GitHub workflow run number and attempt; change `appVersionName` in `android/gradle.properties` when you want a new visible version. Avoid rerunning an older workflow after a newer version has reached Play, since Play rejects older version codes. CI permits up to nine attempts of the same run; start a new run after that.
 
 The publishing job requires a one-time Play Console and GitHub setup:
 
-1. In Play Console, use the app with package name `com.leglord.chessstudio`. Complete its app information and required declarations. Configure **Play App Signing** and upload the **first signed App Bundle in Play Console**; the Publishing API cannot bootstrap an app with no first uploaded artifact. Set up internal testers. If the app already exists, use its registered **upload key**, not an unrelated key. Back up your upload keystore and password securely.
+1. In Play Console, use the app with package name `com.leglord.chessstudio` and an existing active **closed testing** track with testers. The first signed App Bundle has already been uploaded manually. Use the same registered **upload key** for CI, not an unrelated key. Back up your upload keystore and password securely.
 2. In Google Cloud, create or choose a project and enable the **Google Play Developer API**. Create a service account and invite its email address under **Play Console → Users and permissions**. Grant access only to Chess Studio and the **View app information and download bulk reports (read-only)** and **Release apps to testing tracks** permissions. Create a JSON key for that service account.
-3. In the GitHub repository, create an environment called `play-internal` under **Settings → Environments**. Restrict deployment branches to `main`. Leave required reviewers off if every build should deploy automatically. Add the following *environment secrets*:
+3. In the GitHub repository, create an environment called `play-closed` under **Settings → Environments**. Restrict deployment branches to `main`. Leave required reviewers off if every build should deploy automatically. Add the following *environment secrets*:
 
    | Secret | Value |
    | --- | --- |
@@ -26,10 +26,10 @@ The publishing job requires a one-time Play Console and GitHub setup:
    | `PLAY_UPLOAD_KEY_ALIAS` | Alias of the upload key, for example `chessstudio` |
    | `PLAY_SERVICE_ACCOUNT_JSON` | Entire downloaded Google service account JSON key |
 
-   To prepare the keystore value locally without line breaks, run `base64 < upload-key.p12 | tr -d '\n'` and paste its output directly into the secret field. Never commit the keystore, passwords, base64 text, or service account JSON. Remove any local temporary copies you no longer need.
-4. Run **Build Chess Studio Android** from the repository’s Actions tab, or push a change to the Android app. Check the `build` and `publish-internal` jobs, then confirm the release and tester availability in Play Console. Before those secrets are added, the publishing job fails with the name of the missing secret; the APK and App Bundle artifacts still build.
+   To prepare the keystore value locally without line breaks, run `base64 < upload-key.p12 | tr -d '\n'` and paste its output directly into the secret field. Never commit the keystore, passwords, base64 text, or service account JSON. Remove any local temporary copies you no longer need. If Play has more than one active closed track, add an **environment variable** (not a secret) named `PLAY_CLOSED_TRACK` with the exact track name shown by the workflow's track-selection error. It is optional for one active closed track.
+4. Run **Build Chess Studio Android** from the repository’s Actions tab on `main`, or push a change to the Android app. Check the `build` and `publish-closed` jobs, then confirm the new version code in **Play Console → Closed testing → Manage track** and install the update using your enrolled tester account. Before those secrets are added, the publishing job fails with the name of the missing secret; the APK and App Bundle artifacts still build. A release may still need Play review, and managed publishing may require a manual publish step in Console.
 
-For the first Console upload, download the unsigned `chess-studio-unsigned-bundle` workflow artifact and sign `app-release.aab` with the same PKCS#12 key using JDK 17:
+For a manual Console upload or recovery, download the unsigned `chess-studio-unsigned-bundle` workflow artifact and sign `app-release.aab` with the same PKCS#12 key using JDK 17:
 
 ```bash
 export PLAY_UPLOAD_STORE_PASSWORD='your keystore password'
@@ -40,7 +40,7 @@ jarsigner -keystore upload-key.p12 -storetype PKCS12 \
 jarsigner -verify chess-studio-first.aab
 ```
 
-Replace `chessstudio` with your key alias. Keep these values out of shell history and transcripts. The first workflow publish attempt will fail until Play accepts the initial Console upload. A later new run creates a higher version code automatically.
+Replace `chessstudio` with your key alias. Keep these values out of shell history and transcripts. After a manual upload, start a **new** workflow run to get a higher version code for the next automatic release.
 
 If you previously installed a directly signed APK and let Play generate a different **app signing key**, the Play-distributed app has a different device signature. Export your Progress JSON before uninstalling the old APK, then install the Play build and import the backup. Supplying your existing app signing key during Play App Signing setup preserves the device signature, but gives Google a copy of that private key; choose that setup deliberately.
 

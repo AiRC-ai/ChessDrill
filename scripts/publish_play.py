@@ -1,7 +1,7 @@
-"""Publish one signed Chess Studio App Bundle to Google Play internal testing.
+"""Publish one signed Chess Studio App Bundle to an existing Play closed test.
 
 Credentials come from a GitHub environment secret and are never written to disk.
-The only release track this script can change is internal testing.
+The script refuses to update production, open, or internal testing tracks.
 """
 
 import argparse
@@ -15,13 +15,51 @@ PACKAGE = "com.leglord.chessstudio"
 API = f"https://androidpublisher.googleapis.com/androidpublisher/v3/applications/{PACKAGE}"
 UPLOAD_API = f"https://androidpublisher.googleapis.com/upload/androidpublisher/v3/applications/{PACKAGE}"
 SCOPE = "https://www.googleapis.com/auth/androidpublisher"
+NON_CLOSED_TRACKS = {"production", "beta", "qa", "internal"}
+ACTIVE_RELEASE_STATUSES = {"completed", "inProgress"}
 
 
-def publish_bundle(session, bundle: Path, name: str, notes: str) -> int:
-    """Create an edit, upload the bundle, assign it to internal, then commit."""
+def select_closed_track(tracks: list[dict], requested: str = "") -> str:
+    """Choose an existing, active phone/tablet closed test without guessing."""
+    eligible = {
+        track["track"]
+        for track in tracks
+        if isinstance(track, dict)
+        and isinstance(track.get("track"), str)
+        and track["track"] not in NON_CLOSED_TRACKS
+        and ":" not in track["track"]  # Exclude form-factor tracks.
+        and any(
+            release.get("status") in ACTIVE_RELEASE_STATUSES
+            for release in track.get("releases", [])
+            if isinstance(release, dict)
+        )
+    }
+    requested = requested.strip()
+    if requested:
+        if requested not in eligible:
+            raise ValueError(
+                f"PLAY_CLOSED_TRACK={requested!r} is not an active closed test track. "
+                f"Active closed tracks: {', '.join(sorted(eligible)) or 'none'}."
+            )
+        return requested
+    if len(eligible) != 1:
+        raise ValueError(
+            "Set PLAY_CLOSED_TRACK to the intended closed test track name. "
+            f"Active closed tracks: {', '.join(sorted(eligible)) or 'none'}."
+        )
+    return next(iter(eligible))
+
+
+def publish_bundle(session, bundle: Path, name: str, notes: str, track_name: str = "") -> int:
+    """Resolve the closed track, upload a bundle, assign it, then commit."""
     response = session.post(f"{API}/edits", json={}, timeout=30)
     response.raise_for_status()
     edit_id = quote(str(response.json()["id"]), safe="")
+
+    response = session.get(f"{API}/edits/{edit_id}/tracks", timeout=30)
+    response.raise_for_status()
+    track = select_closed_track(response.json().get("tracks", []), track_name)
+    print(f"Targeting existing Play closed testing track: {track}", flush=True)
 
     with bundle.open("rb") as artifact:
         response = session.post(
@@ -43,8 +81,8 @@ def publish_bundle(session, bundle: Path, name: str, notes: str) -> int:
         "releaseNotes": [{"language": "en-US", "text": notes[:500]}],
     }
     response = session.put(
-        f"{API}/edits/{edit_id}/tracks/internal",
-        json={"track": "internal", "releases": [release]},
+        f"{API}/edits/{edit_id}/tracks/{quote(track, safe='')}",
+        json={"track": track, "releases": [release]},
         timeout=30,
     )
     response.raise_for_status()
@@ -64,6 +102,8 @@ def main() -> None:
     parser.add_argument("--bundle", type=Path, required=True)
     parser.add_argument("--name", required=True)
     parser.add_argument("--notes", default="Chess Studio improvements and fixes.")
+    parser.add_argument("--track", default=os.environ.get("PLAY_CLOSED_TRACK", ""),
+                        help="Existing closed track name; optional if exactly one is active")
     args = parser.parse_args()
 
     if not args.bundle.is_file() or args.bundle.stat().st_size == 0:
@@ -79,9 +119,9 @@ def main() -> None:
         json.loads(credentials_json), scopes=[SCOPE]
     )
     version_code = publish_bundle(
-        AuthorizedSession(credentials), args.bundle, args.name, args.notes
+        AuthorizedSession(credentials), args.bundle, args.name, args.notes, args.track
     )
-    print(f"Published Chess Studio version code {version_code} to Play internal testing.")
+    print(f"Submitted Chess Studio version code {version_code} to Play closed testing.")
 
 
 if __name__ == "__main__":

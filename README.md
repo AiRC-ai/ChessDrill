@@ -16,7 +16,7 @@ The dashboard brings analysis findings, selected lines, due positions, and openi
 
 ## Android app
 
-The `android/` project packages Chess Studio and its local Stockfish engine as an installable Android app. The lessons, drills, puzzle deck, and PGN review work offline; public-account analysis needs a connection. The Android build workflow produces APKs and an App Bundle, then publishes successful builds to Play's internal testing track once the one-time credentials are configured. [Android build, Play setup, and transfer instructions](android/README.md) explain the release setup and how to move a Progress JSON backup from the website into the app. Website and app storage are separate.
+The `android/` project packages Chess Studio and its local Stockfish engine as an installable Android app. The lessons, drills, puzzle deck, and PGN review work offline; public-account analysis needs a connection. The Android build workflow produces APKs and an App Bundle, then submits successful builds to the existing Play closed testing track once the one-time credentials are configured. [Android build, Play setup, and transfer instructions](android/README.md) explain the release setup and how to move a Progress JSON backup from the website into the app. Website and app storage are separate.
 
 The [Play submission sheet](docs/PLAY_SUBMISSION.md) contains the privacy URL, code-based Data safety starting answers, listing copy, and remaining Console steps.
 

@@ -76,15 +76,15 @@ jobs:
           path: android/app/build/outputs/bundle/release/app-release.aab
           if-no-files-found: error
 
-  publish-internal:
-    name: Publish to Play internal testing
+  publish-closed:
+    name: Publish to Play closed testing
     if: github.ref == 'refs/heads/main'
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    environment: play-internal
+    environment: play-closed
     concurrency:
-      group: chess-studio-play-internal
+      group: chess-studio-play-closed
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
@@ -109,7 +109,7 @@ jobs:
         run: |
           for secret in PLAY_UPLOAD_KEYSTORE_BASE64 PLAY_UPLOAD_STORE_PASSWORD PLAY_UPLOAD_KEY_PASSWORD PLAY_UPLOAD_KEY_ALIAS PLAY_SERVICE_ACCOUNT_JSON; do
             if [[ -z "${!secret}" ]]; then
-              echo "Missing $secret in the play-internal GitHub environment. See android/README.md." >&2
+              echo "Missing $secret in the play-closed GitHub environment. See android/README.md." >&2
               exit 1
             fi
           done
@@ -135,9 +135,10 @@ jobs:
           rm -f "$store"
       - name: Install Play API client
         run: python -m pip install -r scripts/requirements-play.txt
-      - name: Upload to Play internal testing
+      - name: Upload to Play closed testing
         env:
           PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          PLAY_CLOSED_TRACK: ${{ vars.PLAY_CLOSED_TRACK }}
         run: |
           set -euo pipefail
           notes="$(git log -1 --pretty=%s | cut -c 1-350)"
