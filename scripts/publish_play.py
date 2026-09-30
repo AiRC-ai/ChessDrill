@@ -11,7 +11,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 
-PACKAGE = "com.leglerisaac.chessstudio"
+PACKAGE = "com.leglord.chessstudio"
 API = f"https://androidpublisher.googleapis.com/androidpublisher/v3/applications/{PACKAGE}"
 UPLOAD_API = f"https://androidpublisher.googleapis.com/upload/androidpublisher/v3/applications/{PACKAGE}"
 SCOPE = "https://www.googleapis.com/auth/androidpublisher"

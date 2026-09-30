@@ -1,4 +1,4 @@
-package com.leglerisaac.chessstudio;
+package com.leglord.chessstudio;
 
 import android.app.Activity;
 import android.content.ActivityNotFoundException;

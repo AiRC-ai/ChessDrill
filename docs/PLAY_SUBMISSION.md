@@ -1,6 +1,6 @@
 # Chess Studio: Google Play submission sheet
 
-The Android package is `com.leglerisaac.chessstudio`. Use the built and signed App Bundle from `android/README.md`. This sheet describes the code in this repository as of September 29, 2026; recheck it when network behavior, SDKs, or Play's forms change. Play Console declarations and review must be completed in the owner's account.
+The Android package is `com.leglord.chessstudio`. Use the built and signed App Bundle from `android/README.md`. This sheet describes the code in this repository as of September 29, 2026; recheck it when network behavior, SDKs, or Play's forms change. Play Console declarations and review must be completed in the owner's account.
 
 ## Privacy policy and app content
 

@@ -6,7 +6,7 @@ The Android app bundles the Chess Studio website and Stockfish 19 Lite in a loca
 
 Install Android Studio with Android SDK 36 and JDK 17, plus Node.js 22. From the repository root run `npm ci`. Open `android/` in Android Studio and build the `app` module, or run `gradle :app:assembleDebug` from `android/` with Gradle 8.11.1 installed. Gradle rebuilds the web app with `/assets/web/` as its base and includes the output in the APK. GitHub Actions produces debug and unsigned release APK artifacts, plus an unsigned App Bundle, on changes to the app.
 
-The Android package is `com.leglerisaac.chessstudio`. CI produces an unsigned release APK and a debug APK for verification. Sign release APKs with the same private signing key for all updates; never commit that key or password to the repository. Debug APKs have a different signature and cannot update an installed release build. Back up progress before changing build variants or uninstalling.
+The Android package is `com.leglord.chessstudio`. CI produces an unsigned release APK and a debug APK for verification. Sign release APKs with the same private signing key for all updates; never commit that key or password to the repository. Debug APKs have a different signature and cannot update an installed release build. The earlier `com.leglerisaac.chessstudio` APK is a separate Android app; export its Progress JSON before uninstalling it, then import that backup in the new app.
 
 ## Automatic Google Play internal releases
 
@@ -14,7 +14,7 @@ Each successful `main` build of the Android workflow signs the exact App Bundle 
 
 The publishing job requires a one-time Play Console and GitHub setup:
 
-1. In Play Console, create the app with package name `com.leglerisaac.chessstudio`. Complete its app information and required declarations. Configure **Play App Signing** and upload the **first signed App Bundle in Play Console**; the Publishing API cannot bootstrap an app with no first uploaded artifact. Set up internal testers. If the app already exists, use its registered **upload key**, not an unrelated key. Back up your upload keystore and password securely.
+1. In Play Console, use the app with package name `com.leglord.chessstudio`. Complete its app information and required declarations. Configure **Play App Signing** and upload the **first signed App Bundle in Play Console**; the Publishing API cannot bootstrap an app with no first uploaded artifact. Set up internal testers. If the app already exists, use its registered **upload key**, not an unrelated key. Back up your upload keystore and password securely.
 2. In Google Cloud, create or choose a project and enable the **Google Play Developer API**. Create a service account and invite its email address under **Play Console → Users and permissions**. Grant access only to Chess Studio and the **View app information and download bulk reports (read-only)** and **Release apps to testing tracks** permissions. Create a JSON key for that service account.
 3. In the GitHub repository, create an environment called `play-internal` under **Settings → Environments**. Restrict deployment branches to `main`. Leave required reviewers off if every build should deploy automatically. Add the following *environment secrets*:
 

@@ -3,11 +3,11 @@ plugins {
 }
 
 android {
-    namespace 'com.leglerisaac.chessstudio'
+    namespace 'com.leglord.chessstudio'
     compileSdk 36
 
     defaultConfig {
-        applicationId 'com.leglerisaac.chessstudio'
+        applicationId 'com.leglord.chessstudio'
         minSdk 26
         targetSdk 36
         // CI supplies a unique code for every Play upload; local builds keep their stable version.

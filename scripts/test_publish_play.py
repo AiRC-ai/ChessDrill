@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from publish_play import publish_bundle
+from publish_play import PACKAGE, publish_bundle
 
 
 class Response:
@@ -55,6 +55,10 @@ class PublishPlayTests(unittest.TestCase):
         self.assertEqual(release["versionCodes"], ["100011"])
         self.assertEqual(release["status"], "completed")
         self.assertEqual(session.calls[3][2]["params"], {"changesInReviewBehavior": "ERROR_IF_IN_REVIEW"})
+
+    def test_publishing_target_matches_android_application_id(self):
+        gradle = (Path(__file__).resolve().parent.parent / "android/app/build.gradle").read_text()
+        self.assertIn(f"applicationId '{PACKAGE}'", gradle)
 
     def test_failed_upload_does_not_change_track_or_commit(self):
         session = Session([Response({"id": "17"}), Response(error=RuntimeError("upload failed"))])
