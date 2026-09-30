@@ -1,14 +1,39 @@
 import { Chess } from 'chess.js';
 import { afterEach, expect, it, vi } from 'vitest';
 import { connectReview, exportMistakeDeck, handleReviewAction, restoreMistakeDeck, reviewPracticeView, startDueMistakes } from './review.js';
-import { analysis, connectAnalysis, handleAnalysisAction, puzzleView } from './analysis.js';
+import { analysis, analysisView, connectAnalysis, handleAnalysisAction, handleAnalysisInput, puzzleView } from './analysis.js';
 
 const board = new Chess();
 board.move('f3');
 board.move('e5');
 const fen = board.fen();
 
-afterEach(() => { restoreMistakeDeck([]); analysis.report = null; vi.unstubAllGlobals(); });
+afterEach(() => { restoreMistakeDeck([]); analysis.report = null; analysis.platform = 'lichess'; analysis.username = ''; vi.unstubAllGlobals(); });
+
+it('defaults to Lichess and opens matching themes even for a Chess.com game report', () => {
+  expect(analysis.platform).toBe('lichess');
+  expect(analysisView()).toContain('<option value="lichess" selected>Lichess</option>');
+  analysis.report = {
+    platform:'chesscom',username:'SamplePlayer',confidence:'Medium',dateFrom:0,dateTo:0,
+    gamesAnalyzed:10,requestedGames:10,record:{scorePct:50,wins:5,draws:0,losses:5},
+    metrics:{averageAccuracy:null,accuracySample:0},strengths:[],weaknesses:[],phases:[],
+    openings:[],recentGames:[],trainingPositions:[],
+    recommendations:[
+      {category:'Forks',reason:'Practice forks',practice:'8 puzzles',signal:'2 missed',lichessTheme:'fork'},
+      {category:'Pins',reason:'Practice pins',practice:'8 puzzles',signal:'2 missed',lichessTheme:'pin'},
+      {category:'Mixed',reason:'Practice mixed',practice:'8 puzzles',signal:'2 missed'},
+    ],
+  };
+  const html = analysisView();
+  expect(html).toContain('MOVE MIRROR · Chess.com');
+  expect(html).toContain('https://lichess.org/training/fork');
+  expect(html).toContain('https://lichess.org/training/pin');
+  expect(html).toContain('href="https://lichess.org/training"');
+  expect(html.match(/Practice on Lichess/g)).toHaveLength(3);
+  expect(html).not.toContain('chess.com/puzzles');
+  handleAnalysisInput({id:'analysis-platform',value:'chesscom'});
+  expect(analysis.platform).toBe('chesscom');
+});
 
 it('explains a saved game puzzle after reveal and keeps older cards usable', () => {
   vi.stubGlobal('localStorage', {setItem:vi.fn(),getItem:vi.fn()});

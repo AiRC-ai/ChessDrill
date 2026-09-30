@@ -848,7 +848,7 @@ function buildRecommendations(games: GameDiagnostic[], metrics: DiagnosticMetric
       key: "speed",
       category: "Mixed Pattern Speed",
       reason: "Short mixed sets improve recognition without replacing slower calculation practice.",
-      practice: "Puzzle Rush Survival · 1× per week",
+      practice: "Short Lichess puzzles · 1× per week",
       signal: `${metrics.timeoutLosses} timeout losses in the sample`,
       lichessTheme: "short",
       score: 18 + (metrics.timeoutLosses / total) * 180,
@@ -878,7 +878,7 @@ export function analyzeGames(
   username: string,
   games: ChessGame[],
   requestedGames: number,
-  platform: ChessPlatform = "chesscom",
+  platform: ChessPlatform = "lichess",
 ): AnalysisReport {
   const diagnostics = games
     .map((game) => parseGame(game, username))
