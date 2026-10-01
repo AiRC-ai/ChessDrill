@@ -284,7 +284,7 @@ function throwIfAborted(signal?: AbortSignal) {
 
 async function startEngine() {
   if (!engineSupported()) {
-    throw new Error("This browser does not support the local Stockfish engine.")
+    throw new Error("This device does not support the local Stockfish engine.")
   }
   const bus = createBus(createWorkerEngine())
   const uciReady = waitForLine(bus, (line) => line === "uciok")
@@ -485,7 +485,7 @@ export async function analyzeGamesWithEngine(
         ...position,
         bestMove: before.bestMove,
         bestMoveSan: sanFromUci(position.fen, before.bestMove),
-        bestLine: uciLineToSan(position.fen, before.pv, 6),
+        bestLine: uciLineToSan(position.fen, before.pv, 9),
         punishmentMove: after.bestMove,
         punishmentMoveSan: sanFromUci(position.afterFen, after.bestMove),
         evaluationBefore: before.scoreCp,
@@ -551,7 +551,7 @@ export async function analyzeFullGame(
           : Math.max(0, Math.min(2_000, previous.scoreCp + result.scoreCp))
         ply.bestMove = previous.bestMove
         ply.bestSan = sanFromUci(ply.beforeFen, previous.bestMove)
-        ply.bestLine = uciLineToSan(ply.beforeFen, previous.pv, 6)
+        ply.bestLine = uciLineToSan(ply.beforeFen, previous.pv, 9)
         ply.evalBefore = ply.color === "w" ? previous.scoreCp : -previous.scoreCp
         ply.evalAfter = board.turn() === "w" ? result.scoreCp : -result.scoreCp
         ply.loss = loss

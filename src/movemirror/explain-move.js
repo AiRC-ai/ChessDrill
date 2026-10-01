@@ -25,7 +25,7 @@ export function solutionLine(fen, bestMove, candidate = []) {
     if (!first) return [];
     const line = [first.san];
     if (!Array.isArray(candidate) || candidate[0] !== first.san) return line;
-    for (const san of candidate.slice(1,6)) {
+    for (const san of candidate.slice(1,9)) {
       if (typeof san !== 'string' || san.length > 20) break;
       const move = moveSan(chess, san);
       if (!move) break;
@@ -184,4 +184,35 @@ export function explainBestMove({
   }
   const headline = principle === 'Prevent checkmate' ? 'It changes the mating threat' : `${principle}: ${best.san}`;
   return {headline,principle,why:points.join(' '),contrast,question,line};
+}
+
+/** Explain the continuation the learner actually had to find, from legal moves. */
+export function explainPuzzleIdea(options, challengeLine) {
+  const explanation = explainBestMove(options);
+  if (!challengeLine || challengeLine.length < 3) return {...explanation,idea:''};
+  const chess = new Chess(options.fen);
+  const steps = [];
+  let reply = '';
+  for (const [index,san] of challengeLine.entries()) {
+    const beforeCheck = chess.isCheck();
+    const move = moveSan(chess,san);
+    if (!move) break;
+    if (index % 2) { reply = move.san; continue; }
+    if (!index) continue;
+    let detail;
+    if (chess.isCheckmate()) detail = 'finishes with checkmate';
+    else if (beforeCheck) detail = 'answers the check';
+    else if (move.promotion) detail = `promotes the pawn to a ${PIECES[move.promotion]}`;
+    else if (move.captured) detail = `captures the ${PIECES[move.captured]} on ${move.to}`;
+    else if (chess.isCheck()) detail = 'gives check and forces a response';
+    else {
+      const targets = chess.board().flat().filter(item => item && item.color !== move.color &&
+        ['q','r','b','n'].includes(item.type) && chess.attackers(item.square,move.color).includes(move.to));
+      detail = targets.length ? `attacks the ${PIECES[targets[0].type]} on ${targets[0].square}`
+        : `places the ${PIECES[move.piece]} on ${move.to}`;
+    }
+    steps.push(`After ${reply}, ${move.san} ${detail}.`);
+  }
+  const idea = steps.length ? `The sample line is ${challengeLine.join(' ')}. ${steps.join(' ')} Use the opponent's reply to decide which follow-up the position calls for.` : '';
+  return {...explanation,idea};
 }

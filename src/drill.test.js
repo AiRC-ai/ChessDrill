@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { OPENINGS, allLines } from './openings.js';
-import { chooseTheoryMove, createDrill, eligibleSelectedLines, linePositions, theoryOptions, weightedPick } from './drill.js';
+import { chooseTheoryMove, createDrill, drillTitle, eligibleSelectedLines, linePositions, theoryOptions, weightedPick } from './drill.js';
 
 describe('opening data', () => {
   it('contains only legal move sequences', () => {
@@ -56,5 +56,10 @@ describe('opening data', () => {
     const options = new Map([['e5',common],['c5',rare]]);
     expect(chooseTheoryMove(options,'common',()=>0.5).san).toBe('e5');
     expect(chooseTheoryMove(options,'wild',()=>0.75).san).toBe('c5');
+  });
+  it('shows the full opening name in drills without duplicating imported titles', () => {
+    expect(drillTitle({openingName:'Ruy Lopez',name:'Closed'})).toBe('Ruy Lopez: Closed');
+    expect(drillTitle({openingName:'Ruy Lopez',name:'Ruy Lopez: Closed'})).toBe('Ruy Lopez: Closed');
+    expect(drillTitle({openingName:'Italian Game',name:'Main line'})).toBe('Italian Game: Main line');
   });
 });

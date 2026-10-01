@@ -1,6 +1,7 @@
 import { Chess } from 'chess.js';
 import { reviewFromGame, reviewFromPgn, reviewSummary } from './movemirror/game-review.ts';
-import { explainBestMove, solutionLine, solutionPosition } from './movemirror/explain-move.js';
+import { explainBestMove, explainPuzzleIdea, solutionLine, solutionPosition } from './movemirror/explain-move.js';
+import { advancePuzzle, expectedPuzzleMove, puzzlePlan } from './movemirror/puzzle-line.js';
 import { saveTextFile } from './native-export.js';
 
 const CACHE_KEY = 'chess-studio-reviews-v1';
@@ -45,11 +46,11 @@ export function cancelReviewEngine() { abort?.abort(); }
 
 function saveCache() {
   try { localStorage.setItem(CACHE_KEY, JSON.stringify(cached.slice(0, 3))); }
-  catch { /* A large PGN may exceed the browser quota; the review still works this session. */ }
+  catch { /* A large PGN may exceed the device storage quota; the review still works this session. */ }
 }
 function saveDeck() {
   try { localStorage.setItem(DECK_KEY, JSON.stringify(deck.slice(0, 120))); }
-  catch { state.notice = 'Browser storage is full. These practice cards may not persist after a reload.'; }
+  catch { state.notice = 'Device storage is full. These practice cards may not persist after closing Chess Studio.'; }
 }
 export function dueMistakeCount() { return deck.filter(card => card.due <= Date.now()).length; }
 export function mistakeDeckSummary() { return {total:deck.length,due:dueMistakeCount(),learned:deck.filter(card=>card.streak>=2).length}; }
@@ -141,7 +142,7 @@ async function runReviewEngine() {
   render();
   try {
     const { analyzeFullGame, engineSupported } = await import('./movemirror/stockfish.ts');
-    if (!engineSupported()) throw new Error('This browser cannot run local Stockfish. You can still replay the game.');
+    if (!engineSupported()) throw new Error('This device cannot run local Stockfish. You can still replay the game.');
     const result = await analyzeFullGame(source, {depth:state.depth,signal:current.signal,onProgress:engineProgress});
     if (state.review?.id !== source.id) return;
     state.review = result;
@@ -199,7 +200,8 @@ function saveAllMistakes() {
 
 function chooseQuiz(ids) {
   if (!ids.length) return;
-  state.quiz = {ids,cursor:0,selected:null,hint:0,attempts:0,feedback:'',solved:false,done:0,lineStep:0};
+  state.quiz = {ids,cursor:0,selected:null,hint:0,usedHint:false,mistakes:0,attempts:0,feedback:'',solved:false,done:0,lineStep:0,step:0,lastMove:null};
+  resetQuizPosition();
   navigate('review-practice');
 }
 
@@ -225,16 +227,28 @@ function studyEvidence(card) {
   };
 }
 
+function resetQuizPosition() {
+  const card = activeCard(), quiz = state.quiz;
+  if (!card || !quiz) return;
+  quiz.chess = new Chess(card.fen);
+  quiz.plan = puzzlePlan(card.fen,card.bestMove,studyEvidence(card).bestLine);
+  quiz.step = 0;
+  quiz.lastMove = null;
+}
+
 function nextCard() {
   const quiz = state.quiz;
   if (!quiz) return;
   quiz.cursor++;
   quiz.selected = null;
   quiz.hint = 0;
+  quiz.usedHint = false;
+  quiz.mistakes = 0;
   quiz.attempts = 0;
   quiz.feedback = '';
   quiz.solved = false;
   quiz.lineStep = 0;
+  resetQuizPosition();
   render();
 }
 
@@ -248,7 +262,7 @@ function recordAttempt(card, independentlyCorrect) {
 export function handleReviewSquare(square) {
   const quiz = state.quiz, card = activeCard();
   if (!quiz || !card || quiz.solved) return;
-  const chess = new Chess(card.fen);
+  const chess = quiz.chess;
   const piece = chess.get(square);
   if (!quiz.selected) {
     if (piece?.color === card.color) { quiz.selected = square; render(); }
@@ -259,16 +273,25 @@ export function handleReviewSquare(square) {
   quiz.selected = null;
   if (!options.length) { quiz.feedback = 'That move is not legal here.'; render(); return; }
   quiz.attempts++;
-  if (options.some(move=>`${move.from}${move.to}${move.promotion||''}`===card.bestMove)) {
-    const independent = quiz.attempts === 1 && !quiz.hint;
-    recordAttempt(card, independent);
-    quiz.solved = true;
-    quiz.lineStep = 1;
-    quiz.done++;
-    quiz.feedback = independent ? `Found it: ${card.bestSan}. You will see it again in ${card.streak===1?'one day':card.streak===2?'three days':'a longer interval'}.` : `That's ${card.bestSan}. It will return soon for another try.`;
+  const outcome = advancePuzzle(chess,quiz.plan,quiz.step,options.find(move => move.san === expectedPuzzleMove(chess,quiz.plan,quiz.step)?.san) || options[0]);
+  if (outcome.correct) {
+    quiz.step = outcome.step;
+    quiz.lastMove = outcome.lastMove;
+    quiz.hint = 0;
+    if (outcome.solved) {
+      const independent = !quiz.mistakes && !quiz.usedHint;
+      recordAttempt(card, independent);
+      quiz.solved = true;
+      quiz.lineStep = quiz.step;
+      quiz.done++;
+      quiz.feedback = independent ? `Idea found in ${quiz.plan.moves} ${quiz.plan.moves===1?'move':'moves'}. You will see it again in ${card.streak===1?'one day':card.streak===2?'three days':'a longer interval'}.` : 'Idea complete. This card will return soon for another try.';
+    } else {
+      quiz.feedback = `${outcome.played.san} — the opponent replies ${outcome.reply.san}. Find the follow-up (${outcome.step/2+1}/${quiz.plan.moves}).`;
+    }
   } else {
+    quiz.mistakes++;
     quiz.hint = Math.max(quiz.hint,1);
-    quiz.feedback = 'Legal, but it does not match the engine line. Scan checks, captures, and threats; try again.';
+    quiz.feedback = 'Legal, but it misses the idea in this position. Scan checks, captures, and threats; try again.';
   }
   render();
 }
@@ -353,9 +376,9 @@ export function handleReviewAction(element) {
     case 'practice-all-mistakes': startAllMistakes(); return true;
     case 'study-review-opening': studyOpening(state.review?.opening); return true;
     case 'export-review-pgn': downloadReview(); return true;
-    case 'review-hint': if (state.quiz) {state.quiz.hint=Math.min(2,state.quiz.hint+1);render();} return true;
+    case 'review-hint': if (state.quiz) {state.quiz.hint=Math.min(2,state.quiz.hint+1);state.quiz.usedHint=true;render();} return true;
     case 'review-reveal': {
-      const card=activeCard(); if (card && !state.quiz?.solved) {recordAttempt(card,false);state.quiz.solved=true;state.quiz.lineStep=1;state.quiz.done++;state.quiz.hint=2;state.quiz.feedback=`The engine prefers ${card.bestSan}. This card will return in ten minutes.`;render();} return true;
+      const card=activeCard(); if (card && !state.quiz?.solved) {recordAttempt(card,false);state.quiz.solved=true;state.quiz.lineStep=1;state.quiz.done++;state.quiz.hint=2;state.quiz.feedback=`The suggested idea starts with ${card.bestSan}. Replay the full line below; this card will return in ten minutes.`;render();} return true;
     }
     case 'review-line-step': {
       const card=activeCard(); if (card && state.quiz?.solved) {
@@ -385,7 +408,7 @@ export function gameReviewView() {
   return `<main class="page game-review-page"><div class="review-top"><button class="back" data-action="analyze">← Back to analysis</button><span class="eyebrow">GAME REVIEW LAB · ${esc(player.toUpperCase())} SIDE</span></div>
     <section class="review-intro"><div><p class="eyebrow">YOUR GAMES, MOVE BY MOVE</p><h1>You vs ${esc(review.opponent)}</h1><p>${esc(review.opening)} · ${review.plies.length} half-moves · Local Stockfish analysis${review.plies.length>160?' · First 160 half-moves checked':''}</p></div>${safeGameUrl(review.id)?`<a href="${esc(safeGameUrl(review.id))}" target="_blank" rel="noopener noreferrer">Original game ↗</a>`:''}</section>
     <div class="review-layout"><div class="review-board-column"><div class="review-board-wrap"><div class="review-eval" aria-label="White evaluation ${esc(current?evalLabel(shownEvaluation):'unknown')}"><div style="height:${percent}%"></div><span>${esc(current?evalLabel(shownEvaluation):'—')}</span></div>${boardHtml(fen,review.color,null,null,lineBoard?null:ply?.uci)}</div><div class="review-controls"><button data-action="review-ply" data-index="0" aria-label="Go to start">|←</button><button data-action="review-prev" aria-label="Previous move">←</button><strong>${lineBoard?`Engine line ${state.variation}/${ply.bestLine.length}`:ply?`${ply.number}${ply.color==='w'?'.':'...'} ${esc(ply.san)}`:'Starting position'}</strong><button data-action="review-next" aria-label="Next move">→</button><button data-action="review-ply" data-index="${review.plies.length}" aria-label="Go to end">→|</button></div><p class="review-board-caption">${lineBoard?'Showing the engine’s suggested continuation. The evaluation is from before the move, not a new score for this line.':analyzed?'Evaluations are from White’s perspective. Move labels compare the engine’s choice at the selected search depth.':'Replay the moves, then run the engine for decision insights.'}</p></div>
-      <div class="review-detail-column"><section class="review-engine-box"><div><p class="eyebrow">STOCKFISH 19 LITE · ON THIS DEVICE</p><h2>${analyzed?'Engine review ready':'Review every decision'}</h2><p>${analyzed?`Depth ${review.depth} · ${review.checkedPlies}/${review.plies.length} half-moves checked. Re-run at another depth if you want a second look.`:'One game at a time. The browser checks each position, including your opponent’s decisions; long games can take a few minutes.'}</p></div><div class="review-engine-actions"><label>Search depth <select id="review-depth" ${state.busy?'disabled':''}><option value="8" ${state.depth===8?'selected':''}>Quick · 8</option><option value="9" ${state.depth===9?'selected':''}>Balanced · 9</option><option value="12" ${state.depth===12?'selected':''}>Deeper · 12</option></select></label>${state.busy?'<button class="secondary" data-action="cancel-review-engine">Stop</button>':`<button class="primary" data-action="run-review-engine">${analyzed?'Recheck game':'Run engine review'} →</button>`}</div>${state.busy?`<div class="review-progress" role="status"><span id="review-progress-label">Loading Stockfish…</span><div><i id="review-progress-bar" style="width:${state.percent}%"></i></div></div>`:''}${state.error?`<p class="analysis-error" role="alert">${esc(state.error)}</p>`:''}${state.notice?`<p class="review-notice" role="status">${esc(state.notice)}</p>`:''}</section>
+      <div class="review-detail-column"><section class="review-engine-box"><div><p class="eyebrow">STOCKFISH 19 LITE · ON THIS DEVICE</p><h2>${analyzed?'Engine review ready':'Review every decision'}</h2><p>${analyzed?`Depth ${review.depth} · ${review.checkedPlies}/${review.plies.length} half-moves checked. Re-run at another depth if you want a second look.`:'One game at a time. The engine checks each position on this device, including your opponent’s decisions; long games can take a few minutes.'}</p></div><div class="review-engine-actions"><label>Search depth <select id="review-depth" ${state.busy?'disabled':''}><option value="8" ${state.depth===8?'selected':''}>Quick · 8</option><option value="9" ${state.depth===9?'selected':''}>Balanced · 9</option><option value="12" ${state.depth===12?'selected':''}>Deeper · 12</option></select></label>${state.busy?'<button class="secondary" data-action="cancel-review-engine">Stop</button>':`<button class="primary" data-action="run-review-engine">${analyzed?'Recheck game':'Run engine review'} →</button>`}</div>${state.busy?`<div class="review-progress" role="status"><span id="review-progress-label">Loading Stockfish…</span><div><i id="review-progress-bar" style="width:${state.percent}%"></i></div></div>`:''}${state.error?`<p class="analysis-error" role="alert">${esc(state.error)}</p>`:''}${state.notice?`<p class="review-notice" role="status">${esc(state.notice)}</p>`:''}</section>
       <section class="review-insight"><span class="review-badge ${current?current.classification.toLowerCase():''}">${current?esc(current.classification):'Replay'}</span><div><p class="eyebrow">${ply?`${ply.number}${ply.color==='w'?'.':'...'} ${ply.color===review.color?'YOUR MOVE':'OPPONENT MOVE'}`:'STARTING POSITION'}</p><h2>${ply?esc(ply.san):'See the game unfold'}</h2></div>${explanation?`<div class="review-teaching"><small>KEY IDEA · ${esc(explanation.principle)}</small><h3>${esc(explanation.headline)}</h3><p>${esc(explanation.why)}</p>${explanation.contrast?`<p class="review-why-contrast">${esc(explanation.contrast)}</p>`:''}<p class="review-teaching-question"><b>Next time, ask:</b> ${esc(explanation.question)}</p></div>`:`<p>${esc(ply ? 'Run the engine to see what changed after this move.' : 'Select any move below to inspect the board.')}</p>`}${current?`<div class="review-move-metrics"><span><b>${current.mateThreat?'Forced mate':`${Math.round(current.loss)} cp`}</b> ${current.mateThreat?'allowed':'lost'}</span><span><b>${esc(current.bestSan)}</b> engine choice</span><span><b>${esc(evalLabel(current.evalAfter))}</b> after move</span></div>${current.bestLine?.length?`<div class="review-line"><small>EXPLORE ENGINE LINE</small><div><button data-action="review-variation" data-index="0" class="${state.variation===0?'active':''}">Game</button>${current.bestLine.map((san,i)=>`<button data-action="review-variation" data-index="${i+1}" class="${state.variation===i+1?'active':''}">${esc(san)}</button>`).join('')}</div></div>`:''}${current.color===review.color && current.loss>=60?`<button class="primary" data-action="practice-review-move" data-index="${state.cursor-1}">Try the better move →</button>`:''}`:''}</section>
       <section class="review-timeline"><div class="review-section-head"><h3>Move timeline</h3><span>${review.plies.length} half-moves</span></div><div class="review-move-grid">${Array.from({length:Math.ceil(review.plies.length/2)},(_,i)=>`<div class="review-move-pair"><span>${i+1}.</span>${[review.plies[2*i],review.plies[2*i+1]].map(p=>p?`<button class="review-move ${state.cursor===p.ply?'active':''} ${p.classification?`grade-${p.classification.toLowerCase()}`:''}" data-action="review-ply" data-index="${p.ply}" title="${p.classification?esc(p.classification):'Move'}">${esc(p.san)}${p.classification==='Mistake'||p.classification==='Blunder'?' !':''}</button>`:'<span></span>').join('')}</div>`).join('')}</div></section></div></div>
     ${analyzed?`<section class="review-after"><div class="review-section-head"><div><p class="eyebrow">MAKE THE REVIEW STICK</p><h2>Your decision map</h2></div><button class="secondary" data-action="export-review-pgn">Download annotated PGN</button></div><div class="review-stats"><article><strong>${summary.checked}</strong><span>Your decisions checked</span></article><article><strong>${summary.averageLoss??'—'}</strong><span>Average loss on non-mate moves</span></article><article><strong>${summary.mistakes} / ${summary.blunders}</strong><span>Mistakes / blunders</span></article><article><strong>${summary.mateThreats}</strong><span>Moves allowing mate</span></article></div><div class="review-two-col"><section class="analysis-panel"><h3>Where the misses happened</h3>${summary.phases.map(phase=>`<div class="review-phase"><b>${phase.phase}</b><span>${phase.errors} of ${phase.checked} checked moves were flagged</span></div>`).join('')}<p class="review-caveat">Engine scores are estimates at depth ${review.depth}; a second pass may change close calls.</p></section><section class="analysis-panel"><h3>Your turning points</h3>${summary.turningPoints.length?summary.turningPoints.map(p=>`<button class="review-turning-point" data-action="review-ply" data-index="${p.ply}"><span><b>${p.number}${p.color==='w'?'.':'...'} ${esc(p.san)}</b><small>${esc(p.classification)} · ${p.mateThreat?'allowed mate':`${Math.round(p.loss)} cp`} · try ${esc(p.bestSan)}</small></span><span>View →</span></button>`).join(''):'<p>No 60+ cp losses in your checked decisions. Try another game or a deeper pass.</p>'}</section></div><div class="review-callout"><div><p class="eyebrow">YOUR PERSONAL PUZZLE DECK</p><h3>Practice the moves you missed</h3><p>Save your turning points, solve the original positions without seeing the answer, and review them again on a growing schedule.</p></div><div><button class="primary" data-action="save-review-all" ${summary.turningPoints.length?'':'disabled'}>Save up to 20 misses →</button><button class="secondary" data-action="practice-due-mistakes" ${dueMistakeCount()?'':'disabled'}>Practice due (${dueMistakeCount()})</button></div></div></section>`:''}</main>`;
@@ -396,12 +419,13 @@ export function reviewPracticeView() {
   if (!quiz) return '<main class="page"><h1>No practice cards selected.</h1><button data-action="practice">Practice →</button></main>';
   if (!card) return `<main class="page review-finished"><p class="eyebrow">PRACTICE COMPLETE</p><h1>${quiz.done} positions revisited.</h1><p>The next review appears on its due date. Incorrect and revealed moves return sooner.</p><button class="primary" data-action="practice">Back to practice →</button></main>`;
   const evidence = studyEvidence(card);
-  const explanation = quiz.solved ? explainBestMove({
+  const explanation = quiz.solved ? explainPuzzleIdea({
     fen:card.fen,bestMove:card.bestMove,bestLine:evidence.bestLine,
     playedSan:card.playedSan,punishmentMove:evidence.replyMove,punishmentSan:evidence.replySan,
     mateThreat:card.mateThreat,loss:card.loss,
-  }) : null;
-  const position = explanation ? solutionPosition(card.fen,explanation.line,quiz.lineStep) : {fen:card.fen,lastMove:null};
-  const hint = quiz.hint ? quiz.hint===1?card.bestMove.slice(0,2):card.bestMove : null;
-  return `<main class="drill-page review-study"><div class="drill-head"><button class="back" data-action="practice">← Exit practice</button><div class="drill-meta"><span>YOUR GAME PUZZLES · ${quiz.cursor+1}/${quiz.ids.length}</span><b>Move ${card.moveNumber} vs ${esc(card.opponent)}</b></div><div class="progress-track"><i style="width:${(quiz.cursor/quiz.ids.length)*100}%"></i></div></div><section class="drill-grid"><div>${boardHtml(position.fen,card.color,quiz.solved?null:quiz.selected,quiz.solved?null:hint,position.lastMove)}${explanation?`<p class="review-board-caption">${quiz.lineStep===0?'Starting position':`After ${esc(explanation.line[quiz.lineStep-1])}`} · illustrative engine line</p>`:''}</div><aside class="coach"><p class="eyebrow">${card.color==='w'?'WHITE':'BLACK'} TO MOVE · ${esc(card.phase.toUpperCase())}</p><h2>${quiz.solved?'Understand the answer.':'Find a better move.'}</h2><p class="challenge-context">In your game you played <b>${esc(card.playedSan)}</b> and ${card.mateThreat?'allowed a forced mate':`lost about ${(card.loss/100).toFixed(1)} pawns of evaluation`}. ${quiz.solved?'Compare that decision with the engine line.':'Look for checks, captures, and threats.'}</p><div class="feedback ${quiz.feedback?'show':''}" role="status">${esc(quiz.feedback||'Select a piece and its destination.')}</div>${explanation?`<div class="review-why"><p class="eyebrow">WHY THE ENGINE PREFERS IT</p><h3>${esc(explanation.headline)}</h3><p>${esc(explanation.why)}</p>${explanation.contrast?`<p class="review-why-contrast">${esc(explanation.contrast)}</p>`:''}<p class="review-teaching-question"><b>Next time, ask:</b> ${esc(explanation.question)}</p><div class="review-line"><small>EXPLORE THE SUGGESTED LINE</small><div><button data-action="review-line-step" data-index="0" class="${quiz.lineStep===0?'active':''}">Start</button>${explanation.line.map((san,index)=>`<button data-action="review-line-step" data-index="${index+1}" class="${quiz.lineStep===index+1?'active':''}">${esc(san)}</button>`).join('')}</div></div><small class="review-why-note">One illustrative continuation${evidence.depth?` at depth ${evidence.depth}`:''}; other replies are possible.</small></div><button class="primary wide" data-action="review-next-card">${quiz.cursor+1===quiz.ids.length?'Finish session':'Next position →'}</button>`:`<button class="secondary wide" data-action="review-hint">${quiz.hint===0?'Highlight a piece':quiz.hint===1?'Show destination':'Hint shown'}</button><button class="text-button" data-action="review-reveal">Reveal best move</button>`}</aside></section></main>`;
+  },quiz.plan.challengeLine) : null;
+  const position = explanation ? solutionPosition(card.fen,explanation.line,quiz.lineStep) : {fen:quiz.chess.fen(),lastMove:quiz.lastMove};
+  const expected = !quiz.solved && expectedPuzzleMove(quiz.chess,quiz.plan,quiz.step);
+  const hint = quiz.hint && expected ? quiz.hint===1?expected.from:`${expected.from}${expected.to}` : null;
+  return `<main class="drill-page review-study"><div class="drill-head"><button class="back" data-action="practice">← Exit practice</button><div class="drill-meta"><span>YOUR GAME PUZZLES · ${quiz.cursor+1}/${quiz.ids.length}</span><b>Move ${card.moveNumber} vs ${esc(card.opponent)}</b></div><div class="progress-track"><i style="width:${(quiz.cursor/quiz.ids.length)*100}%"></i></div></div><section class="drill-grid"><div>${boardHtml(position.fen,card.color,quiz.solved?null:quiz.selected,quiz.solved?null:hint,position.lastMove)}${explanation?`<p class="review-board-caption">${quiz.lineStep===0?'Starting position':`After ${esc(explanation.line[quiz.lineStep-1])}`} · illustrative engine line</p>`:`<p class="review-board-caption">Your move ${quiz.step/2+1} of ${quiz.plan.moves} · follow the idea</p>`}</div><aside class="coach"><p class="eyebrow">${card.color==='w'?'WHITE':'BLACK'} TO MOVE · ${esc(card.phase.toUpperCase())}</p><h2>${quiz.solved?'Understand the answer.':`Find move ${quiz.step/2+1} of ${quiz.plan.moves}.`}</h2><p class="challenge-context">In your game you played <b>${esc(card.playedSan)}</b> and ${card.mateThreat?'allowed a forced mate':`lost about ${(card.loss/100).toFixed(1)} pawns of evaluation`}. ${quiz.solved?'Compare that decision with the engine line.':'Look for checks, captures, and threats, including after the reply.'}</p><div class="feedback ${quiz.feedback?'show':''}" role="status">${esc(quiz.feedback||'Select a piece and its destination.')}</div>${explanation?`<div class="review-why"><p class="eyebrow">WHY THE ENGINE PREFERS IT</p><h3>${esc(explanation.headline)}</h3><p>${esc(explanation.why)}</p>${explanation.idea?`<p class="review-idea"><b>How it unfolds:</b> ${esc(explanation.idea)}</p>`:''}${explanation.contrast?`<p class="review-why-contrast">${esc(explanation.contrast)}</p>`:''}<p class="review-teaching-question"><b>Next time, ask:</b> ${esc(explanation.question)}</p><div class="review-line"><small>EXPLORE THE SUGGESTED LINE</small><div><button data-action="review-line-step" data-index="0" class="${quiz.lineStep===0?'active':''}">Start</button>${explanation.line.map((san,index)=>`<button data-action="review-line-step" data-index="${index+1}" class="${quiz.lineStep===index+1?'active':''}">${esc(san)}</button>`).join('')}</div></div><small class="review-why-note">One illustrative continuation${evidence.depth?` at depth ${evidence.depth}`:''}; other replies are possible.</small></div><button class="primary wide" data-action="review-next-card">${quiz.cursor+1===quiz.ids.length?'Finish session':'Next position →'}</button>`:`<button class="secondary wide" data-action="review-hint">${quiz.hint===0?'Highlight a piece':quiz.hint===1?'Show destination':'Hint shown'}</button><button class="text-button" data-action="review-reveal">Reveal full idea</button>`}</aside></section></main>`;
 }

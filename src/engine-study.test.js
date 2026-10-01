@@ -1,7 +1,7 @@
 import { Chess } from 'chess.js';
 import { afterEach, expect, it, vi } from 'vitest';
-import { connectReview, exportMistakeDeck, handleReviewAction, restoreMistakeDeck, reviewPracticeView, startDueMistakes } from './review.js';
-import { analysis, analysisView, connectAnalysis, handleAnalysisAction, handleAnalysisInput, puzzleView } from './analysis.js';
+import { connectReview, exportMistakeDeck, handleReviewAction, handleReviewSquare, restoreMistakeDeck, reviewPracticeView, startDueMistakes } from './review.js';
+import { analysis, analysisView, connectAnalysis, handleAnalysisAction, handleAnalysisInput, handlePuzzleSquare, puzzleView } from './analysis.js';
 
 const board = new Chess();
 board.move('f3');
@@ -25,6 +25,8 @@ it('defaults to Lichess and opens matching themes even for a Chess.com game repo
     ],
   };
   const html = analysisView();
+  expect(html).toContain('The engine runs on this device; positions stay here.');
+  expect(html).not.toContain('runs in your browser');
   expect(html).toContain('MOVE MIRROR · Chess.com');
   expect(html).toContain('https://lichess.org/training/fork');
   expect(html).toContain('https://lichess.org/training/pin');
@@ -75,4 +77,41 @@ it('explains a MoveMirror engine puzzle and replays its saved continuation', () 
   expect(puzzleView()).toContain('After g3');
   handleAnalysisAction({dataset:{action:'moment-line-step',index:'0'}});
   expect(puzzleView()).toContain('Starting position · illustrative engine line');
+});
+
+it('keeps the explanation hidden until both moves in a saved puzzle are solved', () => {
+  vi.stubGlobal('localStorage', {setItem:vi.fn(),getItem:vi.fn()});
+  connectReview({render:vi.fn(),navigate:vi.fn(),studyOpening:vi.fn()});
+  restoreMistakeDeck([{id:'two-moves',fen,bestMove:'e2e3',bestSan:'e3',bestLine:['e3','Qh4+','g3'],playedSan:'g4',
+    opponent:'Opponent',color:'w',phase:'Opening',gameId:'sample',moveNumber:2,
+    loss:2000,mateThreat:true,due:Date.now()-1,streak:0,attempts:0}]);
+  startDueMistakes();
+  handleReviewSquare('e2'); handleReviewSquare('e3');
+  expect(reviewPracticeView()).toContain('Find move 2 of 2');
+  expect(reviewPracticeView()).toContain('the opponent replies Qh4+');
+  expect(reviewPracticeView()).not.toContain('WHY THE ENGINE PREFERS IT');
+  handleReviewAction({dataset:{action:'review-hint'}});
+  expect(reviewPracticeView()).toContain('Your move 2 of 2');
+  handleReviewSquare('g2'); handleReviewSquare('g3');
+  expect(reviewPracticeView()).toContain('WHY THE ENGINE PREFERS IT');
+  expect(reviewPracticeView()).toContain('g3 answers the check');
+  expect(exportMistakeDeck()[0].attempts).toBe(1);
+  expect(exportMistakeDeck()[0].streak).toBe(0);
+});
+
+it('continues an engine moment through the opponent reply before revealing the idea', () => {
+  analysis.report = {engineAnalysis:{depth:9,criticalMoments:[{
+    fen,color:'White',opening:'King Pawn Game',phase:'Opening',opponent:'Opponent',
+    playedMove:'g4',bestMove:'e2e3',bestMoveSan:'e3',bestLine:['e3','Qh4+','g3'],
+    punishmentMove:'d8h4',punishmentMoveSan:'Qh4#',centipawnLoss:2000,
+    category:'Checkmate Patterns',reason:'The move allowed a forcing mate.',gameUrl:'https://lichess.org/example',
+  }]}};
+  connectAnalysis({render:vi.fn(),navigate:vi.fn(),studyOpening:vi.fn()});
+  handleAnalysisAction({dataset:{action:'train-moments'}});
+  handlePuzzleSquare('e2'); handlePuzzleSquare('e3');
+  expect(puzzleView()).toContain('Find move 2 of 2');
+  expect(puzzleView()).not.toContain('WHY THE ENGINE PREFERS IT');
+  handlePuzzleSquare('g2'); handlePuzzleSquare('g3');
+  expect(puzzleView()).toContain('WHY THE ENGINE PREFERS IT');
+  expect(puzzleView()).toContain('g3 answers the check');
 });

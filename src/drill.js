@@ -18,6 +18,13 @@ export function createDrill(line, color = line.repertoireColor) {
   return { line, color, positions, prompts };
 }
 
+export function drillTitle(line) {
+  const opening = String(line?.openingName || '').trim();
+  const variation = String(line?.name || '').trim();
+  if (!opening || variation.toLocaleLowerCase().startsWith(opening.toLocaleLowerCase())) return variation || opening;
+  return variation ? `${opening}: ${variation}` : opening;
+}
+
 export function weightedPick(items, stats = {}, random = Math.random) {
   if (!items.length) return null;
   const weights = items.map(item => {
