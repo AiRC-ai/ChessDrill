@@ -2,6 +2,7 @@ import { Chess } from 'chess.js';
 import { OPENINGS, allLines } from './openings.js';
 import { chooseTheoryMove, createDrill, drillTitle, eligibleSelectedLines, parseMove, weightedPick } from './drill.js';
 import { filterOpeningLines, openingMatchesSearch } from './opening-search.js';
+import { filterFavoriteOpenings } from './favorites.js';
 import { buildPositionIndex, coverageByOpening, coverageForLines, dueReviewKeys, linesToPgn, openingInsight, parsePgnCollection, positionKey, positionOptions, updatePositionStat } from './learning.js';
 import { analysisView, analysisSummary, cancelAnalysisWork, connectAnalysis, handleAnalysisAction, handleAnalysisInput, handlePuzzleSquare, puzzleView, submitAnalysis } from './analysis.js';
 import { dashboardView } from './dashboard.js';
@@ -22,12 +23,12 @@ const INTERMEDIATE=new Set([...BEGINNER,'Alekhine Defense','Benoni Defense','Ben
 const RECOMMENDATIONS=[['Italian Game','Natural development and clear attacking plans.'],["Queen's Gambit",'A principled introduction to positional chess.'],['London System','A dependable setup that is easy to revisit.'],['Caro-Kann Defense','A sound, structured answer to 1.e4.'],['French Defense','Teaches pawn chains and counterplay.'],['Sicilian Defense','Dynamic winning chances against 1.e4.'],['Ruy Lopez','Classic strategic themes at every level.'],["King's Indian Defense",'Active kingside play against 1.d4.']];
 const STORAGE_KEY='chessdrill-v2';
 function loadSaved(){try{const raw=JSON.parse(localStorage.getItem(STORAGE_KEY)||'null')||{...JSON.parse(localStorage.getItem('chessdrill-v1')||'{}'),version:2};return validateBackup(raw,new Set(allLines().map(l=>l.id)),OPENINGS.map(o=>o.id),OPENING_LESSONS.map(l=>l.id));}catch{return {};}}
-const saved=loadSaved(),state={screen:'dashboard',selected:new Set(saved.selected||[]),expanded:new Set(saved.expanded||['italian']),searchCollapsed:new Set(),stats:saved.stats||{},positionStats:saved.positionStats||{},lessonCompleted:saved.lessonCompleted||{},lessonFilter:'all',lesson:null,side:saved.side||'repertoire',focus:saved.focus||'all',sort:saved.sort||'recommended',query:'',level:saved.level||'beginner',showShortLines:saved.showShortLines||false,challengeDifficulty:saved.challengeDifficulty||'common',timerSeconds:saved.timerSeconds||0,lineRoles:saved.lineRoles||{},customLines:saved.customLines||[],orientation:'white',session:null,challenge:null,selectedSquare:null,message:'',hintLevel:0,pendingOutOfBook:null};
+const saved=loadSaved(),state={screen:'dashboard',selected:new Set(saved.selected||[]),expanded:new Set(saved.expanded||['italian']),searchCollapsed:new Set(),favoriteOpenings:new Set(saved.favoriteOpenings||[]),favoriteLines:new Set(saved.favoriteLines||[]),stats:saved.stats||{},positionStats:saved.positionStats||{},lessonCompleted:saved.lessonCompleted||{},lessonFilter:'all',lesson:null,side:saved.side||'repertoire',focus:saved.focus||'all',sort:saved.sort||'recommended',query:'',level:saved.level||'beginner',showShortLines:saved.showShortLines||false,challengeDifficulty:saved.challengeDifficulty||'common',timerSeconds:saved.timerSeconds||0,lineRoles:saved.lineRoles||{},customLines:saved.customLines||[],orientation:'white',session:null,challenge:null,selectedSquare:null,message:'',hintLevel:0,pendingOutOfBook:null};
 let theoryIndex;
 const workingLines=()=>[...allLines(),...state.customLines];
 const workingOpenings=()=>state.customLines.length?[...OPENINGS,{id:'custom-repertoire',name:'Custom repertoire',eco:'PGN',color:'white',description:'Your imported lines',lines:state.customLines}]:OPENINGS;
 function rebuildIndex(){theoryIndex=buildPositionIndex(workingLines());const valid=new Set(workingLines().map(l=>l.id));state.selected=new Set([...state.selected].filter(id=>valid.has(id)));}rebuildIndex();
-function backupData(){return {version:2,selected:[...state.selected],expanded:[...state.expanded],stats:state.stats,positionStats:state.positionStats,lessonCompleted:state.lessonCompleted,side:state.side,focus:state.focus,sort:state.sort,level:state.level,showShortLines:state.showShortLines,challengeDifficulty:state.challengeDifficulty,timerSeconds:state.timerSeconds,lineRoles:state.lineRoles,customLines:state.customLines};}
+function backupData(){return {version:2,selected:[...state.selected],expanded:[...state.expanded],favoriteOpenings:[...state.favoriteOpenings],favoriteLines:[...state.favoriteLines],stats:state.stats,positionStats:state.positionStats,lessonCompleted:state.lessonCompleted,side:state.side,focus:state.focus,sort:state.sort,level:state.level,showShortLines:state.showShortLines,challengeDifficulty:state.challengeDifficulty,timerSeconds:state.timerSeconds,lineRoles:state.lineRoles,customLines:state.customLines};}
 function save(){try{localStorage.setItem(STORAGE_KEY,JSON.stringify(backupData()));state.storageNotice='';}catch{state.storageNotice='Device storage is full. Back up your progress to a file before closing Chess Studio.';}}
 const esc=v=>String(v).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 const pct=s=>s?.attempts?Math.round(s.correct/s.attempts*100):null;
@@ -53,12 +54,13 @@ function appShell(content){
 }
 
 function recommendationsView(){return `<section class="recommended"><div class="section-heading"><div><p class="eyebrow">RECOMMENDED OPENINGS</p><h2>A strong place to start</h2></div><p>Balanced, practical repertoires</p></div><div class="recommendation-grid">${RECOMMENDATIONS.map(([name,reason])=>{const o=workingOpenings().find(x=>x.name===name),v=o&&(openingForLevel(o)||o);if(!v)return'';const added=v.lines.every(l=>state.selected.has(l.id));return `<article><span class="color-dot ${o.color}">${o.color==='white'?'W':'B'}</span><div><b>${esc(name)}</b><p>${esc(reason)}</p><small>${v.lines.length} foundational lines</small></div><button class="${added?'added':''}" data-action="recommend" data-id="${o.id}">${added?'✓ Added':'+ Add'}</button></article>`;}).join('')}</div></section>`;}
+function favoriteButton(kind,id,name,active){const verb=active?'Remove':'Add';return `<button type="button" class="favorite-button ${active?'is-favorite':''}" data-action="favorite-${kind}" data-id="${esc(id)}" aria-pressed="${active}" aria-label="${verb} ${esc(name)} ${active?'from':'to'} favorites" title="${verb} favorite">${active?'★':'☆'}</button>`;}
 function openingCard(o){
-  const searching=!!state.query.trim(),expanded=searching?!state.searchCollapsed.has(o.id):state.expanded.has(o.id);
+  const searching=!!state.query.trim(),filtered=searching||state.focus==='favorites',expanded=filtered?!state.searchCollapsed.has(o.id):state.expanded.has(o.id);
   const count=o.lines.filter(l=>state.selected.has(l.id)).length,all=count===o.lines.length,some=count>0&&!all;
   const match=searching&&!openingMatchesSearch(o,state.query)?o.lines[0]:null;
   const guide=OPENING_LESSONS.find(l=>l.openingId===o.id),insight=openingInsight(o.name);
-  return `<article class="opening-card ${expanded?'expanded':''}"><div class="opening-summary"><button class="opening-toggle ${all?'checked':''} ${some?'partial':''}" data-action="toggle-opening" data-id="${o.id}" aria-label="${all?'Deselect':'Select'} all ${esc(o.name)} lines" aria-pressed="${some?'mixed':all}"><span>✓</span></button><button class="opening-details" data-action="expand" data-id="${o.id}" aria-expanded="${expanded}"><span class="color-dot ${o.color}">${o.color==='white'?'W':'B'}</span><span class="opening-title"><b>${esc(o.name)}</b><small>${esc(o.eco)} · ${esc(o.description)}</small>${match?`<small class="match-context">Variation match: ${esc(match.name)}</small>`:''}</span><span class="line-count">${count}/${o.lines.length} lines</span><span class="chevron" aria-hidden="true">⌄</span></button></div>${expanded?`<div class="opening-plan"><span><b>Plan</b> ${esc(insight.plan)}</span><span><b>Pawn break</b> ${esc(insight.break)}</span><span><b>Watch for</b> ${esc(insight.watch)}</span>${guide?`<button class="text-button" data-action="open-lesson" data-id="${guide.id}">Study guided lesson →</button>`:''}</div><div class="line-list"><div class="line-list-head"><span>VARIATION</span><span>ROLE</span><button data-action="toggle-opening" data-id="${o.id}">${all?'Deselect all':'Select all'}</button></div>${o.lines.map(l=>`<div class="line-row"><label><input type="checkbox" data-line="${l.id}" aria-label="Practice ${esc(l.name)} in ${esc(o.name)}" ${state.selected.has(l.id)?'checked':''}><span class="fake-check">✓</span></label><span><b>${esc(l.name)}</b><small>${esc(l.moves.join(' '))}</small></span><select data-role="${l.id}" aria-label="Practice side for ${esc(l.name)}"><option value="both" ${lineRole(l)==='both'?'selected':''}>Both</option><option value="white" ${lineRole(l)==='white'?'selected':''}>White</option><option value="black" ${lineRole(l)==='black'?'selected':''}>Black</option></select><span class="accuracy">${pct(state.stats[l.id])===null?'New':pct(state.stats[l.id])+'%'}</span></div>`).join('')}</div>`:''}</article>`;
+  return `<article class="opening-card ${expanded?'expanded':''}"><div class="opening-summary"><button class="opening-toggle ${all?'checked':''} ${some?'partial':''}" data-action="toggle-opening" data-id="${o.id}" aria-label="${all?'Deselect':'Select'} all ${esc(o.name)} lines" aria-pressed="${some?'mixed':all}"><span>✓</span></button><button class="opening-details" data-action="expand" data-id="${o.id}" aria-expanded="${expanded}"><span class="color-dot ${o.color}">${o.color==='white'?'W':'B'}</span><span class="opening-title"><b>${esc(o.name)}</b><small>${esc(o.eco)} · ${esc(o.description)}</small>${match?`<small class="match-context">Variation match: ${esc(match.name)}</small>`:''}</span><span class="line-count">${count}/${o.lines.length} lines</span><span class="chevron" aria-hidden="true">⌄</span></button>${favoriteButton('opening',o.id,o.name,state.favoriteOpenings.has(o.id))}</div>${expanded?`<div class="opening-plan"><span><b>Plan</b> ${esc(insight.plan)}</span><span><b>Pawn break</b> ${esc(insight.break)}</span><span><b>Watch for</b> ${esc(insight.watch)}</span>${guide?`<button class="text-button" data-action="open-lesson" data-id="${guide.id}">Study guided lesson →</button>`:''}</div><div class="line-list"><div class="line-list-head"><span>VARIATION</span><span>ROLE</span><button data-action="toggle-opening" data-id="${o.id}">${all?'Deselect all':'Select all'}</button></div>${o.lines.map(l=>`<div class="line-row"><label><input type="checkbox" data-line="${l.id}" aria-label="Practice ${esc(l.name)} in ${esc(o.name)}" ${state.selected.has(l.id)?'checked':''}><span class="fake-check">✓</span></label><span><span class="line-name"><b>${esc(l.name)}</b>${favoriteButton('line',l.id,drillTitle(l),state.favoriteLines.has(l.id))}</span><small>${esc(l.moves.join(' '))}</small></span><select data-role="${l.id}" aria-label="Practice side for ${esc(l.name)}"><option value="both" ${lineRole(l)==='both'?'selected':''}>Both</option><option value="white" ${lineRole(l)==='white'?'selected':''}>White</option><option value="black" ${lineRole(l)==='black'?'selected':''}>Black</option></select><span class="accuracy">${pct(state.stats[l.id])===null?'New':pct(state.stats[l.id])+'%'}</span></div>`).join('')}</div>`:''}</article>`;
 }
 function startSession(review=false,forcedLine=null,reviewKey=null){let line,color,startPly=0;if(review){const key=reviewKey||dueReviewKeys(state.positionStats,selectedPositionKeys())[0];if(!key)return;const node=theoryIndex.get(key);if(!node)return;const id=[...node.lineIds].find(x=>state.selected.has(x));line=forcedLine||workingLines().find(l=>l.id===id);if(!line)return;const chess=new Chess();startPly=line.moves.findIndex(san=>{const match=positionKey(chess.fen())===key;chess.move(san);return match;});if(startPly<0)return;color=node.turn==='w'?'white':'black';}else if(forcedLine){line=forcedLine;color=line.repertoireColor;}else{line=weightedPick(availableDrillLines(),state.stats);if(!line)return;color=state.side==='repertoire'?line.repertoireColor:state.side;}const drill=createDrill(line,color),chess=new Chess();for(let i=0;i<startPly;i++)chess.move(drill.positions[i].san);const turn=color==='white'?'w':'b';state.session={drill,chess,cursor:startPly,userMoves:0,mistakes:0,complete:false,busy:drill.positions[startPly]?.turn!==turn,lastMove:null,review,promptStartedAt:Date.now(),promptTimedOut:false,clockStopped:false,hiddenAt:null,mistakePositions:[],teaching:null,awaitContinue:false};state.orientation=color;state.selectedSquare=null;state.message='';state.hintLevel=0;state.screen='drill';render();if(state.session.busy)setTimeout(advanceOpponent,REPLY_PAUSE_MS);}
 async function advanceOpponent(){const s=state.session;if(!s||s.complete)return;const turn=s.drill.color==='white'?'w':'b';while(s.cursor<s.drill.positions.length&&s.drill.positions[s.cursor].turn!==turn){s.busy=true;const p=s.drill.positions[s.cursor];await animateMove(p.from,p.to);if(state.session!==s)return;s.chess.move(p.san);s.lastMove={from:p.from,to:p.to};s.cursor++;s.busy=false;render();if(s.cursor<s.drill.positions.length&&s.drill.positions[s.cursor].turn!==turn)await delay(REPLY_PAUSE_MS);}s.promptStartedAt=Date.now();s.promptTimedOut=false;s.clockStopped=false;if(s.cursor>=s.drill.positions.length)finishLine();render();}
@@ -111,14 +113,20 @@ function handleClick(e){
   }
   if(action==='challenge-difficulty'){state.challengeDifficulty=id;save();}
   if(action==='start-challenge')return startChallenge();
+  if(action==='favorite-opening'||action==='favorite-line'){
+    const list=action==='favorite-opening'?state.favoriteOpenings:state.favoriteLines;
+    const known=action==='favorite-opening'?workingOpenings().some(o=>o.id===id):workingLines().some(l=>l.id===id);
+    if(known){list.has(id)?list.delete(id):list.add(id);save();render();}
+    return;
+  }
   if(action==='expand'){
-    if(state.query.trim())state.searchCollapsed.has(id)?state.searchCollapsed.delete(id):state.searchCollapsed.add(id);
+    if(state.query.trim()||state.focus==='favorites')state.searchCollapsed.has(id)?state.searchCollapsed.delete(id):state.searchCollapsed.add(id);
     else{state.expanded.has(id)?state.expanded.delete(id):state.expanded.add(id);save();}
   }
-  if(action==='select-visible'){(state.query.trim()?visibleOpenings():levelCatalog()).forEach(o=>o.lines.forEach(l=>state.selected.add(l.id)));save();}
+  if(action==='select-visible'){(state.query.trim()||state.focus==='favorites'?visibleOpenings():levelCatalog()).forEach(o=>o.lines.forEach(l=>state.selected.add(l.id)));save();}
   if(action==='clear'){state.selected.clear();save();}
   if(action==='toggle-opening'||action==='recommend'){
-    const full=workingOpenings().find(o=>o.id===id),shown=action==='toggle-opening'&&state.query.trim()?visibleOpenings().find(o=>o.id===id):null;
+    const full=workingOpenings().find(o=>o.id===id),shown=action==='toggle-opening'&&(state.query.trim()||state.focus==='favorites')?visibleOpenings().find(o=>o.id===id):null;
     const o=shown||openingForLevel(full)||full,all=o.lines.every(l=>state.selected.has(l.id));
     o.lines.forEach(l=>all?state.selected.delete(l.id):state.selected.add(l.id));save();
   }
@@ -164,7 +172,7 @@ function handleChange(e){
   if(t.matches('[data-role]')){state.lineRoles[t.dataset.role]=t.value;save();return;}
   if(t.id==='side'){state.side=t.value;save();return;}
   if(t.id==='timer'){state.timerSeconds=Number(t.value);save();return;}
-  if(t.id==='focus'){state.focus=t.value;save();render();return;}
+  if(t.id==='focus'){state.focus=t.value;state.searchCollapsed.clear();save();render();return;}
   if(t.id==='sort'){state.sort=t.value;save();render();return;}
   if(t.id==='catalog-search'){state.query=t.value;state.searchCollapsed.clear();updateOpeningResults();return;}
   if(t.id==='import-file' && t.files?.[0]) void importStudyFile(t.files[0]);
@@ -181,7 +189,7 @@ async function importStudyFile(file){
       const data=validateBackup(raw,known,OPENINGS.map(o=>o.id),OPENING_LESSONS.map(l=>l.id));
       const nextIndex=buildPositionIndex([...allLines(),...data.customLines]);
       if(Object.hasOwn(raw,'reviewCards'))restoreMistakeDeck(raw.reviewCards);
-      Object.assign(state,{...data,selected:new Set(data.selected),expanded:new Set(data.expanded)});
+      Object.assign(state,{...data,selected:new Set(data.selected),expanded:new Set(data.expanded),favoriteOpenings:new Set(data.favoriteOpenings),favoriteLines:new Set(data.favoriteLines),searchCollapsed:new Set()});
       theoryIndex=nextIndex;
       state.importNotice='Backup imported. Your openings and practice history are ready.';
     }else{
@@ -199,7 +207,7 @@ async function importStudyFile(file){
   }catch(error){state.importNotice=error instanceof Error?error.message:'That file could not be imported.';render();}
 }
 
-function studyOpening(name){cancelAnalysisWork();cancelReviewEngine();const normalized=s=>s.toLowerCase().replace(/[’']/g,'').replace(/\b([a-z]{3,})s\b/g,'$1').replace(/[^a-z0-9]/g,'');const target=normalized(name);const opening=workingOpenings().filter(o=>target.includes(normalized(o.name))||normalized(o.name).includes(target)).sort((a,b)=>b.name.length-a.name.length)[0];state.screen='library';state.level='advanced';state.query=opening?.name||'';if(opening){state.expanded.add(opening.id);const main=opening.lines.find(l=>l.name==='Main line')||opening.lines[0];if(main)state.selected.add(main.id);}save();render();}
+function studyOpening(name){cancelAnalysisWork();cancelReviewEngine();const normalized=s=>s.toLowerCase().replace(/[’']/g,'').replace(/\b([a-z]{3,})s\b/g,'$1').replace(/[^a-z0-9]/g,'');const target=normalized(name);const opening=workingOpenings().filter(o=>target.includes(normalized(o.name))||normalized(o.name).includes(target)).sort((a,b)=>b.name.length-a.name.length)[0];state.screen='library';state.level='advanced';state.focus='all';state.query=opening?.name||'';if(opening){state.expanded.add(opening.id);const main=opening.lines.find(l=>l.name==='Main line')||opening.lines[0];if(main)state.selected.add(main.id);}save();render();}
 function render(){
   const active=document.activeElement;
   const focusKey=active?.id?'id':['line','square','role','action'].find(key=>active?.dataset?.[key]);
@@ -252,9 +260,9 @@ function libraryView(){
     <header class="openings-intro"><div><p class="eyebrow">YOUR REPERTOIRE</p><h1>Openings</h1><p>Learn a plan, choose your lines, then practice the key moves.</p></div><div class="openings-intro-actions"><button class="secondary" data-action="lessons">Guided lessons →</button><button class="primary" data-action="start" ${selected.length?'':'disabled'}>Drill ${selected.length} ${selected.length===1?'line':'lines'} →</button></div></header>
     <section class="opening-level" aria-label="Library level"><span>Show openings for</span><div class="level-switch">${['beginner','intermediate','advanced'].map(x=>`<button class="${state.level===x?'active':''}" data-action="level" data-id="${x}" aria-pressed="${state.level===x}">${x[0].toUpperCase()+x.slice(1)}</button>`).join('')}</div></section>
     <details class="opening-secondary"><summary>Drill settings</summary><div class="opening-settings"><label>Practice side<select id="side"><option value="repertoire">Line repertoire side</option><option value="white" ${state.side==='white'?'selected':''}>White only</option><option value="black" ${state.side==='black'?'selected':''}>Black only</option></select></label><label>Recall clock<select id="timer"><option value="0">Untimed</option><option value="15" ${state.timerSeconds===15?'selected':''}>15 seconds</option><option value="5" ${state.timerSeconds===5?'selected':''}>5 seconds</option><option value="2" ${state.timerSeconds===2?'selected':''}>2 seconds</option></select></label></div></details>
-    <section class="library"><div class="section-heading"><div><p class="eyebrow">${catalog.length} FAMILIES · ${catalog.reduce((n,o)=>n+o.lines.length,0).toLocaleString()} LINES</p><h2>Choose lines to practice</h2></div><div class="selection-actions"><button data-action="select-visible">${state.query.trim()?'Select matching lines':'Select all in level'}</button><button data-action="clear">Clear selection</button></div></div>
+    <section class="library"><div class="section-heading"><div><p class="eyebrow">${catalog.length} FAMILIES · ${catalog.reduce((n,o)=>n+o.lines.length,0).toLocaleString()} LINES</p><h2>Choose lines to practice</h2></div><div class="selection-actions"><button data-action="select-visible">${selectionLabel()}</button><button data-action="clear">Clear selection</button></div></div>
       ${state.selected.size>selected.length?`<p class="library-selection-note">${state.selected.size} lines saved; ${selected.length} available with this level and drill side. Your other choices remain saved.</p>`:''}
-      <div class="catalog-tools"><label class="catalog-search"><span>⌕</span><input id="catalog-search" value="${esc(state.query)}" placeholder="Search openings, variations, or ECO…" aria-label="Search openings"></label><select id="focus" aria-label="Filter openings"><option value="all">All openings</option><option value="white" ${state.focus==='white'?'selected':''}>White repertoire</option><option value="black" ${state.focus==='black'?'selected':''}>Black repertoire</option><option value="selected" ${state.focus==='selected'?'selected':''}>Selected openings</option></select><select id="sort" aria-label="Sort openings"><option value="recommended" ${state.sort==='recommended'?'selected':''}>Suggested first</option><option value="eco" ${state.sort==='eco'?'selected':''}>ECO order</option><option value="name" ${state.sort==='name'?'selected':''}>Name A–Z</option><option value="lines" ${state.sort==='lines'?'selected':''}>Most variations</option></select><button class="short-lines-toggle ${state.showShortLines?'active':''}" data-action="toggle-short" aria-pressed="${state.showShortLines}"><span>${state.showShortLines?'✓':''}</span> Show lines under 4 moves</button></div>
+      <div class="catalog-tools"><label class="catalog-search"><span>⌕</span><input id="catalog-search" value="${esc(state.query)}" placeholder="Search openings, variations, or ECO…" aria-label="Search openings"></label><select id="focus" aria-label="Filter openings"><option value="all">All openings</option><option value="white" ${state.focus==='white'?'selected':''}>White repertoire</option><option value="black" ${state.focus==='black'?'selected':''}>Black repertoire</option><option value="selected" ${state.focus==='selected'?'selected':''}>Selected openings</option><option value="favorites" ${state.focus==='favorites'?'selected':''}>★ Favorites</option></select><select id="sort" aria-label="Sort openings"><option value="recommended" ${state.sort==='recommended'?'selected':''}>Suggested first</option><option value="eco" ${state.sort==='eco'?'selected':''}>ECO order</option><option value="name" ${state.sort==='name'?'selected':''}>Name A–Z</option><option value="lines" ${state.sort==='lines'?'selected':''}>Most variations</option></select><button class="short-lines-toggle ${state.showShortLines?'active':''}" data-action="toggle-short" aria-pressed="${state.showShortLines}"><span>${state.showShortLines?'✓':''}</span> Show lines under 4 moves</button></div>
       <p class="catalog-result-count" id="catalog-result-count" role="status">${openingResultCount(visible)}</p>
       <div class="opening-list">${visible.map(openingCard).join('')||noOpeningResults()}</div>
     </section>
@@ -263,13 +271,17 @@ function libraryView(){
 }
 
 function visibleOpenings(){
-  let visible=levelCatalog().filter(o=>state.focus==='all'||(state.focus==='selected'?o.lines.some(l=>state.selected.has(l.id)):o.color===state.focus));
+  let visible=levelCatalog();
+  if(state.focus==='favorites')visible=filterFavoriteOpenings(visible,state.favoriteOpenings,state.favoriteLines);
+  else visible=visible.filter(o=>state.focus==='all'||(state.focus==='selected'?o.lines.some(l=>state.selected.has(l.id)):o.color===state.focus));
   const query=state.query.trim();
   visible=filterOpeningLines(visible,query);
   const recommended=o=>{const index=RECOMMENDATIONS.findIndex(([name])=>name===o.name);return index<0?Infinity:index;};
   const base=(a,b)=>state.sort==='name'?a.name.localeCompare(b.name):state.sort==='lines'?b.lines.length-a.lines.length||a.name.localeCompare(b.name):state.sort==='recommended'?recommended(a)-recommended(b)||a.name.localeCompare(b.name):a.eco.localeCompare(b.eco)||a.name.localeCompare(b.name);
   return visible.sort((a,b)=>query?Number(!openingMatchesSearch(a,query))-Number(!openingMatchesSearch(b,query))||base(a,b):base(a,b));
 }
+
+function selectionLabel(){return state.query.trim()?'Select matching lines':state.focus==='favorites'?'Select favorite lines':'Select all in level';}
 
 function openingResultCount(visible){
   const families=`${visible.length} ${visible.length===1?'opening':'openings'}`;
@@ -278,7 +290,7 @@ function openingResultCount(visible){
   return `${families} · ${count} matching ${count===1?'line':'lines'}`;
 }
 
-function noOpeningResults(){return `<div class="no-results">${state.query.trim()?'No lines match this search in the current level and filter.':'No openings match those filters.'}</div>`;}
+function noOpeningResults(){return `<div class="no-results">${state.query.trim()?'No lines match this search in the current level and filter.':state.focus==='favorites'?'No favorites in this level yet. Star an opening or line to add one.':'No openings match those filters.'}</div>`;}
 
 function updateOpeningResults(){
   const visible=visibleOpenings();
@@ -287,7 +299,7 @@ function updateOpeningResults(){
   if(list)list.innerHTML=visible.map(openingCard).join('')||noOpeningResults();
   if(count)count.textContent=openingResultCount(visible);
   const select=document.querySelector('[data-action="select-visible"]');
-  if(select)select.textContent=state.query.trim()?'Select matching lines':'Select all in level';
+  if(select)select.textContent=selectionLabel();
   const suggestions=document.querySelector('#suggested-openings');
   if(suggestions)suggestions.hidden=!!state.query.trim();
 }

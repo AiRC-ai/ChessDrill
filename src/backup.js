@@ -45,12 +45,14 @@ export function validateBackup(data, knownLines, knownOpenings, knownLessons) {
   for (const key of list(Object.keys(record(data.lessonCompleted)),new Set(knownLessons))) lessonCompleted[key] = bounded(data.lessonCompleted[key]);
   const lineRoles = Object.create(null);
   for (const [key, value] of Object.entries(record(data.lineRoles))) if (ids.has(key)) lineRoles[key] = limit(value,['both','white','black'],'both');
+  const openingIds = new Set([...knownOpenings,...(customLines.length?['custom-repertoire']:[])]);
   const expanded = list(data.expanded,new Set([...knownOpenings,'custom-repertoire']));
   return {
     customLines,selected:list(data.selected,ids),expanded,
+    favoriteOpenings:list(data.favoriteOpenings,openingIds),favoriteLines:list(data.favoriteLines,ids),
     stats,positionStats,lessonCompleted,lineRoles,
     side:limit(data.side,['repertoire','white','black'],'repertoire'),
-    focus:limit(data.focus,['all','white','black','selected'],'all'),
+    focus:limit(data.focus,['all','white','black','selected','favorites'],'all'),
     sort:limit(data.sort,['recommended','eco','name','lines'],'recommended'),
     level:limit(data.level,['beginner','intermediate','advanced'],'beginner'),
     challengeDifficulty:limit(data.challengeDifficulty,['common','varied','wild'],'common'),
